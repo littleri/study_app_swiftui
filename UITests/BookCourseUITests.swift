@@ -1,0 +1,439 @@
+import XCTest
+
+final class BookCourseUITests: XCTestCase {
+  override func setUpWithError() throws { continueAfterFailure = false }
+  private func launch(
+    _ route: String, sheet: String? = nil, session: String = UUID().uuidString,
+    chapter: String = "c2s1", visual: Bool = false
+  ) -> XCUIApplication {
+    let app = XCUIApplication()
+    app.launchArguments = [
+      "--fixture", "--fixture-session", session, "--route", route, "--chapter", chapter,
+    ]
+    if visual { app.launchArguments += ["--fixture-reduce-motion", "--visual-baseline"] }
+    if let sheet { app.launchArguments += ["--sheet", sheet] }
+    app.launch()
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+    return app
+  }
+  func testTabsAndCourseLearningEntry() throws {
+    let app = launch("home")
+    let study = app.buttons["tab-study"]
+    XCTAssertTrue(study.waitForExistence(timeout: 20))
+    study.tap()
+    XCTAssertTrue(app.staticTexts["学习计划"].firstMatch.waitForExistence(timeout: 8))
+    app.buttons["tab-community"].tap()
+    XCTAssertTrue(app.textFields["community.search"].waitForExistence(timeout: 8))
+    app.buttons["tab-profile"].tap()
+    XCTAssertTrue(app.staticTexts["PROFILE"].firstMatch.waitForExistence(timeout: 8))
+  }
+  func testAllRoutesAndGlobalSheetsLaunch() throws {
+    let routes = [
+      "home", "onboarding", "courseSetup", "courseDetail", "upload", "parseReady", "processing",
+      "courseImportProcessing", "chapterConfirm", "courseReady", "courseImportReady", "library",
+      "community", "communityBook", "communityImport", "study", "plan", "flashcards", "lesson",
+      "assignment", "diagnosis", "mistakes", "notes", "voiceNote", "source", "export", "profile",
+      "settings",
+    ]
+    for route in routes {
+      let app = launch(route)
+      if route == "source" {
+        XCTAssertTrue(
+          app.descendants(matching: .any)["reader.page"].firstMatch.waitForExistence(timeout: 20),
+          route)
+      } else {
+        XCTAssertTrue(app.staticTexts.firstMatch.waitForExistence(timeout: 20), route)
+      }
+      let screenshot = XCTAttachment(screenshot: app.screenshot())
+      screenshot.name = "route-" + route
+      screenshot.lifetime = .keepAlways
+      add(screenshot)
+      app.terminate()
+    }
+    for sheet in ["chat", "note", "noteType", "editChapter", "bookSwitcher", "addMaterials"] {
+      let app = launch("study", sheet: sheet)
+      XCTAssertTrue(app.buttons["关闭"].firstMatch.waitForExistence(timeout: 20), sheet)
+      let screenshot = XCTAttachment(screenshot: app.screenshot())
+      screenshot.name = "sheet-" + sheet
+      screenshot.lifetime = .keepAlways
+      add(screenshot)
+      app.terminate()
+    }
+  }
+  /// This uses real screen actions to create the note, then reopens the same
+  /// isolated SQLite fixture directory. No note data is injected into the fixture.
+  func testCourseLessonCitationNoteSurvivesRelaunch() throws {
+    let session = UUID().uuidString
+    let suffix = String(session.prefix(8))
+    let title = "Flow Note " + suffix
+    let body = "Durable understanding from the original textbook " + suffix
+    let app = launch("library", session: session)
+    let course = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "生物 必修 2 遗传与进化"))
+      .firstMatch
+    try reveal(course, in: app)
+    course.tap()
+
+    // Explicitly select chapter and section, even if the restored directory
+    // already opens the section chosen by the deterministic fixture.
+    let chapter = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "第 2 章 基因和染色体的关系"))
+      .firstMatch
+    try reveal(chapter, in: app)
+    if chapter.isSelected { chapter.tap() }
+    chapter.tap()
+    let section = app.buttons.matching(
+      NSPredicate(format: "label BEGINSWITH %@", "第 1 节 减数分裂和受精作用")
+    ).firstMatch
+    try reveal(section, in: app)
+    let enter = app.buttons["进入学习"].firstMatch
+    if enter.exists { section.tap() }
+    section.tap()
+    try reveal(enter, in: app)
+    enter.tap()
+
+    let original = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "查看原文，"))
+      .firstMatch
+    try reveal(original, in: app)
+    original.tap()
+    let page = app.descendants(matching: .any)["reader.page"].firstMatch
+    XCTAssertTrue(page.waitForExistence(timeout: 15))
+    XCTAssertTrue(
+      app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PDF第11页")).firstMatch.exists)
+    keepScreenshot("flow-original-citation", app: app)
+
+    let annotate = app.buttons["批注"]
+    XCTAssertTrue(annotate.waitForExistence(timeout: 10))
+    annotate.tap()
+    // A normalized point is intentionally used on the page surface: the
+    // persisted note must carry a real book/page anchor and page position.
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.35)).tap()
+    let titleField = app.textFields["notes.title"].firstMatch
+    XCTAssertTrue(titleField.waitForExistence(timeout: 10))
+    titleField.tap()
+    let oldTitle = titleField.value as? String ?? ""
+    titleField.typeText(
+      String(repeating: XCUIKeyboardKey.delete.rawValue, count: oldTitle.count) + title)
+    let editor = app.textViews["notes.body"].firstMatch
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.tap()
+    editor.typeText(body)
+    let save = app.buttons["notes.save"].firstMatch
+    try reveal(save, in: app)
+    XCTAssertTrue(save.isEnabled)
+    save.tap()
+    let dismissed = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "exists == false"), object: save)
+    XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 15), .completed)
+    XCTAssertTrue(page.exists)
+    keepScreenshot("flow-note-saved-at-source", app: app)
+    app.terminate()
+
+    // Reuse only the storage session. Launching the notes route does not
+    // seed this title/body, so both assertions depend on the durable save.
+    let reopened = launch("notes", session: session)
+    XCTAssertTrue(
+      reopened.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        .waitForExistence(timeout: 15))
+    XCTAssertTrue(reopened.staticTexts[body].firstMatch.waitForExistence(timeout: 10))
+    keepScreenshot("flow-note-restored-after-relaunch", app: reopened)
+  }
+
+  private func reveal(_ element: XCUIElement, in app: XCUIApplication) throws {
+    XCTAssertTrue(element.waitForExistence(timeout: 15), "Expected flow control was not present")
+    for _ in 0..<8 {
+      if element.isHittable { return }
+      // Swipe in the outside gutter so a focused multiline editor cannot
+      // consume the gesture instead of scrolling its containing sheet.
+      let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.78))
+      let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.30))
+      start.press(forDuration: 0.05, thenDragTo: end)
+    }
+    XCTAssertTrue(element.isHittable, "Expected flow control stayed outside the visible viewport")
+  }
+  private func keepScreenshot(_ name: String, app: XCUIApplication) {
+    let attachment = XCTAttachment(screenshot: app.screenshot())
+    attachment.name = name
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  func testLandscapeCorePages() throws {
+    // A portrait geometry fixture can leave physical orientation at landscapeLeft.
+    // Force a genuine orientation change for every route instead of assigning
+    // an unchanged physical value, which produces no window rotation event.
+    XCUIDevice.shared.orientation = .portrait
+    defer { XCUIDevice.shared.orientation = .portrait }
+    for route in [
+      "home", "onboarding", "courseSetup", "community", "study", "lesson", "source", "assignment",
+      "notes", "profile", "settings",
+    ] {
+      XCUIDevice.shared.orientation = .portrait
+      let app = launch(route, chapter: "c1s1", visual: true)
+      XCUIDevice.shared.orientation = .landscapeLeft
+      let landscape = XCTNSPredicateExpectation(
+        predicate: NSPredicate { _, _ in
+          app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height
+        }, object: nil)
+      XCTAssertEqual(
+        XCTWaiter.wait(for: [landscape], timeout: 15), .completed,
+        "Landscape did not take effect on \(route)")
+      let ready = XCTNSPredicateExpectation(
+        predicate: NSPredicate { _, _ in !app.staticTexts["正在准备学习空间"].exists }, object: nil)
+      XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+      Thread.sleep(forTimeInterval: 0.8)
+      keepScreenshot("landscape-" + route, app: app)
+      app.terminate()
+    }
+  }
+
+  func testNotesLocalPopupsHandwritingRegionAndVoiceSample() throws {
+    let app = launch("source")
+    let page = app.descendants(matching: .any)["reader.page"].firstMatch
+    XCTAssertTrue(page.waitForExistence(timeout: 20))
+    app.buttons["批注"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.35)).tap()
+    let body = app.textViews["notes.body"].firstMatch
+    XCTAssertTrue(body.waitForExistence(timeout: 10))
+    body.tap()
+    body.typeText("Popup closing must preserve this draft.")
+    keepScreenshot("popup-text-keyboard", app: app)
+    app.buttons["关闭"].firstMatch.tap()
+    let closed = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "exists == false"), object: body)
+    XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed)
+    XCTAssertTrue(
+      app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "打开批注：")).firstMatch.exists)
+    keepScreenshot("popup-text-saved-on-close", app: app)
+
+    // Native PencilKit accepts a finger stroke after enabling the original
+    // hand tool; this verifies the simulator path, not physical Pencil.
+    app.buttons["批注"].tap()
+    app.buttons["钢笔"].tap()
+    app.buttons["手指书写"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.40)).press(
+      forDuration: 0.1,
+      thenDragTo: page.coordinate(withNormalizedOffset: CGVector(dx: 0.60, dy: 0.45)))
+    let organize = app.buttons["识别并整理"].firstMatch
+    XCTAssertTrue(organize.waitForExistence(timeout: 10))
+    keepScreenshot("popup-native-pencilkit-stroke", app: app)
+    organize.tap()
+    XCTAssertTrue(app.staticTexts["请确认识别文字"].firstMatch.waitForExistence(timeout: 10))
+    keepScreenshot("popup-ink-demo-confirmation", app: app)
+    app.buttons["收起整理面板"].firstMatch.tap()
+
+    app.buttons["圈选问 AI"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.20)).press(
+      forDuration: 0.1,
+      thenDragTo: page.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)))
+    let question = app.textFields["reader.regionInput"].firstMatch
+    XCTAssertTrue(question.waitForExistence(timeout: 10))
+    question.tap()
+    question.typeText("Explain this textbook region")
+    keepScreenshot("popup-region-keyboard", app: app)
+    let regionSend = app.buttons["reader.regionSend"].firstMatch
+    try reveal(regionSend, in: app)
+    regionSend.tap()
+    XCTAssertTrue(
+      app.descendants(matching: .any)["reader.regionReply"].firstMatch.waitForExistence(timeout: 45)
+    )
+    keepScreenshot("popup-region-reply", app: app)
+    app.buttons["关闭"].firstMatch.tap()
+    XCTAssertFalse(question.exists)
+
+    app.buttons["批注"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.60, dy: 0.55)).tap()
+    let voice = app.buttons["开始语音批注"].firstMatch
+    try reveal(voice, in: app)
+    voice.tap()
+    let sample = app.buttons["使用示例录音"].firstMatch
+    XCTAssertTrue(sample.waitForExistence(timeout: 10))
+    if !sample.isHittable { app.scrollViews["voice.scroll"].firstMatch.swipeUp() }
+    XCTAssertTrue(sample.isHittable)
+    sample.tap()
+    XCTAssertTrue(app.staticTexts["00:08"].firstMatch.waitForExistence(timeout: 10))
+    keepScreenshot("popup-voice-sample-stopped", app: app)
+    let voiceClose = app.buttons.matching(identifier: "关闭").allElementsBoundByIndex.last!
+    voiceClose.tap()
+    let voiceClosed = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "exists == false"), object: sample)
+    XCTAssertEqual(XCTWaiter.wait(for: [voiceClosed], timeout: 10), .completed)
+    keepScreenshot("popup-voice-close-keeps-parent", app: app)
+  }
+
+  func testSourceTextAutosaveSurvivesTermination() throws {
+    let session = UUID().uuidString
+    let text = "Autosaved before termination " + String(session.prefix(8))
+    let app = launch("source", session: session)
+    let page = app.descendants(matching: .any)["reader.page"].firstMatch
+    XCTAssertTrue(page.waitForExistence(timeout: 20))
+    app.buttons["批注"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.35)).tap()
+    let editor = app.textViews["notes.body"].firstMatch
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    editor.tap()
+    editor.typeText(text)
+    XCTAssertTrue(app.staticTexts["已保存"].firstMatch.waitForExistence(timeout: 10))
+    keepScreenshot("autosave-before-termination", app: app)
+    // No Done/Close action is performed. The debounced persisted record must
+    // survive terminating the app with its editor and keyboard still open.
+    app.terminate()
+    let reopened = launch("notes", session: session)
+    XCTAssertTrue(reopened.staticTexts[text].firstMatch.waitForExistence(timeout: 15))
+    keepScreenshot("autosave-restored-after-termination", app: reopened)
+  }
+
+  func testAssistantDockAndFlashcardFlipMasterySurvivesRelaunch() throws {
+    let session = UUID().uuidString
+    let home = launch("home", session: session)
+    let orb = home.buttons["assistant-entry"].firstMatch
+    XCTAssertTrue(orb.waitForExistence(timeout: 20))
+    let end = home.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.44))
+    orb.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      .press(forDuration: 0.1, thenDragTo: end)
+    let docked = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        orb.frame.minX < home.windows.firstMatch.frame.width * 0.1
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [docked], timeout: 5), .completed)
+    keepScreenshot("motion-assistant-docked-left", app: home)
+    orb.tap()
+    let close = home.buttons["global-assistant-close"]
+    XCTAssertTrue(close.waitForExistence(timeout: 10))
+    close.tap()
+    XCTAssertTrue(orb.waitForExistence(timeout: 5))
+    home.terminate()
+
+    let app = launch("flashcards", session: session)
+    let face = app.buttons["flashcard-face"].firstMatch
+    XCTAssertTrue(face.waitForExistence(timeout: 15))
+    let firstQuestion = face.label
+    XCTAssertTrue(firstQuestion.hasPrefix("问题："))
+    XCTAssertEqual(face.value as? String, "unmastered")
+    face.tap()
+    let flipped = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        face.label.hasPrefix("参考答案：") && face.isEnabled
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [flipped], timeout: 5), .completed)
+    keepScreenshot("motion-flashcard-answer", app: app)
+    let remember = app.buttons["flashcard-remember"].firstMatch
+    try reveal(remember, in: app)
+    remember.tap()
+    let advanced = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        face.isEnabled && face.label.hasPrefix("问题：") && face.label != firstQuestion
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [advanced], timeout: 5), .completed)
+    let secondQuestion = face.label
+    print("Flashcard visible frame before swipe: \(face.frame), \(face.label)")
+    face.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).press(
+      forDuration: 0.05,
+      thenDragTo: face.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)))
+    let swiped = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        face.isEnabled && face.label.hasPrefix("问题：") && face.label != secondQuestion
+      }, object: nil)
+    let swipeResult = XCTWaiter.wait(for: [swiped], timeout: 5)
+    keepScreenshot("motion-flashcard-after-swipe", app: app)
+    XCTAssertEqual(swipeResult, .completed, "After swipe: \(face.frame), \(face.label)")
+    keepScreenshot("motion-flashcard-next", app: app)
+    app.terminate()
+
+    let reopened = launch("flashcards", session: session)
+    let restored = reopened.buttons["flashcard-face"].firstMatch
+    XCTAssertTrue(restored.waitForExistence(timeout: 15))
+    XCTAssertEqual(restored.label, firstQuestion)
+    XCTAssertEqual(restored.value as? String, "mastered")
+    keepScreenshot("motion-flashcard-mastery-restored", app: reopened)
+  }
+
+  func testPlanCalendarKeepsSevenColumnsAndSelectsLastDay() throws {
+    let app = launch("plan", visual: true)
+    let first = app.buttons["第 1 天"].firstMatch
+    let seventh = app.buttons["第 7 天"].firstMatch
+    let eighth = app.buttons["第 8 天"].firstMatch
+    let last = app.buttons["第 14 天"].firstMatch
+    XCTAssertTrue(first.waitForExistence(timeout: 15))
+    XCTAssertTrue(seventh.exists && eighth.exists && last.exists)
+    if app.windows.firstMatch.frame.width >= 384 {
+      XCTAssertEqual(first.frame.minY, seventh.frame.minY, accuracy: 1)
+      XCTAssertGreaterThan(eighth.frame.minY, first.frame.minY + 20)
+    }
+    last.tap()
+    XCTAssertTrue(last.isSelected)
+    XCTAssertTrue(app.staticTexts["学习任务 · 第 14 天"].firstMatch.waitForExistence(timeout: 5))
+    keepScreenshot("plan-calendar-seven-columns-last-day", app: app)
+  }
+
+  func testAnnotationConversationAndGuideActionsRemainAvailable() throws {
+    let session = UUID().uuidString
+    let body = "Annotation conversation " + String(session.prefix(8))
+    let app = launch("source", session: session)
+    let page = app.descendants(matching: .any)["reader.page"].firstMatch
+    XCTAssertTrue(page.waitForExistence(timeout: 20))
+    app.buttons["批注"].tap()
+    page.coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.4)).tap()
+    let editor = app.textViews["notes.body"].firstMatch
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    editor.tap()
+    editor.typeText(body)
+    let ask = app.buttons["问 AI"].firstMatch
+    try reveal(ask, in: app)
+    ask.tap()
+    let input = app.textFields["reader.regionInput"].firstMatch
+    XCTAssertTrue(input.waitForExistence(timeout: 10))
+    input.tap()
+    input.typeText("你好")
+    app.buttons["reader.regionSend"].firstMatch.tap()
+    let reply = app.descendants(matching: .any)["reader.regionReply"].firstMatch
+    XCTAssertTrue(reply.waitForExistence(timeout: 45))
+    let replyText = reply.label
+    XCTAssertFalse(replyText.isEmpty)
+    keepScreenshot("annotation-chat-reply-persisted", app: app)
+    app.buttons["关闭"].firstMatch.tap()
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    try reveal(ask, in: app)
+    ask.tap()
+    XCTAssertTrue(reply.waitForExistence(timeout: 10))
+    XCTAssertEqual(reply.label, replyText)
+    keepScreenshot("annotation-chat-restored-on-reopen", app: app)
+    app.terminate()
+
+    let reopened = launch("notes", session: session)
+    XCTAssertTrue(reopened.staticTexts[body].firstMatch.waitForExistence(timeout: 15))
+    reopened.buttons["notes.guide"].firstMatch.tap()
+    let detail = reopened.staticTexts["notes.guideDetail"].firstMatch
+    XCTAssertTrue(detail.waitForExistence(timeout: 10))
+    let firstTitle = detail.label
+    let second = reopened.buttons["notes.guideItem.1"].firstMatch
+    try reveal(second, in: reopened)
+    second.tap()
+    XCTAssertNotEqual(detail.label, firstTitle)
+    let export = reopened.buttons["notes.export"].firstMatch
+    try reveal(export, in: reopened)
+    export.tap()
+    XCTAssertTrue(reopened.buttons["确认导出"].firstMatch.waitForExistence(timeout: 10))
+    reopened.terminate()
+
+    let flashcards = launch("notes", session: session)
+    flashcards.buttons["notes.guide"].firstMatch.tap()
+    let flashcardEntry = flashcards.buttons["notes.flashcards"].firstMatch
+    try reveal(flashcardEntry, in: flashcards)
+    flashcardEntry.tap()
+    XCTAssertTrue(flashcards.buttons["flashcard-face"].firstMatch.waitForExistence(timeout: 10))
+  }
+
+  func testOfflineAssistantGreeting() throws {
+    let app = launch("home", sheet: "chat")
+    let input = app.textFields["assistant-input"]
+    XCTAssertTrue(input.waitForExistence(timeout: 20))
+    input.tap()
+    input.typeText("你好")
+    keepScreenshot("chat-keyboard", app: app)
+    let send = app.buttons["assistant-send"]
+    try reveal(send, in: app)
+    send.tap()
+    XCTAssertTrue(
+      app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "你好！我是你的学习助手")).firstMatch
+        .waitForExistence(timeout: 10))
+  }
+}

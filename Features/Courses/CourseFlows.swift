@@ -1,0 +1,978 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct LearnerOnboardingView: View {
+  @Environment(AppStore.self) private var store
+  @State private var step = 0
+  @State private var name = ""
+  @State private var goal: String?
+  @State private var dailyTime: String?
+  @State private var error: String?
+  @State private var restoredDraft = false
+  @State private var completed = false
+  @FocusState private var nameFocused: Bool
+  var body: some View {
+    GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 0) {
+          Text(["我们怎么称呼你", "你使用云径的主要目标是", "你每天能投入多少学习时间"][step]).font(
+            DS.font(min(34, max(22, geometry.size.width * 0.056)) * 0.8, weight: .bold)
+          ).multilineTextAlignment(.center).frame(height: 44, alignment: .top).padding(.bottom, 12)
+          flowTop(step: step, total: 3) { if step > 0 { step -= 1 } }
+          Spacer(minLength: 30)
+          VStack(spacing: 28) {
+            StickerIcon(
+              step == 0 ? "Sparkles" : step == 1 ? "BookOpen" : "Clock3",
+              tone: step == 0 ? "yellow" : step == 1 ? "blue" : "peach", size: 48)
+            if step == 0 {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("你的称呼").font(DS.font(20, weight: .bold)).foregroundStyle(DS.secondary).frame(
+                  height: 28, alignment: .top)
+                TextField("输入你的姓名或昵称", text: $name).font(DS.font(20)).multilineTextAlignment(
+                  .center
+                ).textContentType(.nickname).padding(16).frame(minHeight: 58).background(
+                  DS.surface, in: RoundedRectangle(cornerRadius: 16)
+                ).overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border)).focused(
+                  $nameFocused
+                ).submitLabel(.next).onSubmit { next() }.onChange(of: name) { _, value in
+                  if value.count > 30 { name = String(value.prefix(30)) }
+                  error = nil
+                }
+              }
+            } else if step == 1 {
+              LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(CourseOptions.goals, id: \.0) { value, label, icon in
+                  CourseChoice(label: label, selected: goal == value, icon: icon, tall: true) {
+                    goal = value
+                  }
+                }
+              }.accessibilityLabel("主要学习目标")
+            } else {
+              LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(CourseOptions.times, id: \.0) { value, label in
+                  Button {
+                    dailyTime = value
+                  } label: {
+                    Text(label).font(DS.font(20, weight: .bold)).multilineTextAlignment(.center)
+                      .frame(maxWidth: .infinity).frame(height: 50)
+                      .foregroundStyle(dailyTime == value ? DS.primaryPressed : DS.text)
+                      .background(dailyTime == value ? DS.primarySoft : DS.surface)
+                      .clipShape(RoundedRectangle(cornerRadius: 14))
+                      .overlay(
+                        RoundedRectangle(cornerRadius: 14).stroke(
+                          dailyTime == value ? DS.primary : DS.border,
+                          lineWidth: dailyTime == value ? 2 : 1))
+                  }.buttonStyle(.plain).accessibilityAddTraits(
+                    dailyTime == value ? .isSelected : [])
+                }
+              }.accessibilityLabel("每日学习时间")
+            }
+          }
+          Spacer(minLength: 32)
+          VStack(spacing: 12) {
+            if let error {
+              Text(error).font(DS.font(14)).foregroundStyle(DS.danger).accessibilityAddTraits(
+                .updatesFrequently)
+            }
+            CourseFlowPrimaryButton(title: step == 2 ? "开始专属学习之旅" : "下一页") { next() }.clipShape(
+              Capsule()
+            ).accessibilityIdentifier("onboarding.next")
+            if step > 0 {
+              Button("跳过") {
+                if step == 1 { goal = nil } else { dailyTime = nil }
+                next()
+              }.font(DS.font(20)).foregroundStyle(DS.secondary).frame(maxWidth: .infinity)
+                .frame(height: 44).buttonStyle(.plain)
+            }
+          }
+        }.frame(maxWidth: 560).frame(
+          minHeight: max(440, geometry.size.height - (store.isPad ? 60 : 40))
+        ).padding(
+          .horizontal, 20
+        ).padding(.top, store.isPad ? 42 : 4).padding(.bottom, 20).frame(maxWidth: .infinity)
+      }.scrollDismissesKeyboard(.interactively)
+    }
+    .onAppear {
+      guard !restoredDraft else { return }
+      restoredDraft = true
+      guard !ProcessInfo.processInfo.arguments.contains("--fixture") else {
+        name = "小明同学"
+        goal = "systematic"
+        dailyTime = "30to60"
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--fixture-step"),
+          arguments.indices.contains(index + 1),
+          let requested = Int(arguments[index + 1])
+        {
+          step = min(2, max(0, requested))
+        }
+        return
+      }
+      let draft = LearnerOnboardingDraft.load()
+      step = draft.step
+      name = draft.name
+      goal = draft.goal
+      dailyTime = draft.dailyTime
+    }
+    .onChange(of: step) { _, _ in persistDraft() }
+    .onChange(of: name) { _, _ in persistDraft() }
+    .onChange(of: goal) { _, _ in persistDraft() }
+    .onChange(of: dailyTime) { _, _ in persistDraft() }
+  }
+  private func persistDraft() {
+    guard restoredDraft, !completed, !ProcessInfo.processInfo.arguments.contains("--fixture") else {
+      return
+    }
+    LearnerOnboardingDraft(step: step, name: name, goal: goal, dailyTime: dailyTime).save()
+  }
+  private func next() {
+    if step == 0 && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      error = "请先填写称呼"
+      nameFocused = true
+      return
+    }
+    nameFocused = false
+    error = nil
+    if step < 2 {
+      withAnimation { step += 1 }
+    } else {
+      completed = true
+      if !ProcessInfo.processInfo.arguments.contains("--fixture") { LearnerOnboardingDraft.clear() }
+      store.completeOnboarding(
+        name: name.trimmingCharacters(in: .whitespacesAndNewlines), goal: goal, dailyTime: dailyTime
+      )
+    }
+  }
+}
+
+@ViewBuilder private func flowTop(step: Int, total: Int, back: @escaping () -> Void) -> some View {
+  HStack {
+    Button(action: back) {
+      Image(systemName: "arrow.left").frame(width: 44, height: 44).background(
+        DS.surface, in: Circle())
+    }.buttonStyle(.plain).accessibilityLabel("上一步").opacity(step == 0 && total == 3 ? 0 : 1)
+    Spacer()
+    HStack(spacing: 3) {
+      Text("\(step + 1)").font(DS.font(20, weight: .bold))
+      Text("/\(total)").font(DS.font(20)).foregroundStyle(DS.muted)
+    }.accessibilityLabel("第 \(step + 1) 步，共 \(total) 步")
+    Spacer()
+    Color.clear.frame(width: 44, height: 44)
+  }.frame(minHeight: 52)
+}
+
+struct CourseSetupView: View {
+  @Environment(AppStore.self) private var store
+  @State private var error: String?
+  @State private var saving = false
+  @State private var selectingFile = false
+  var body: some View {
+    @Bindable var store = store
+    GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 12) {
+          Text(
+            store.draft.step < 0
+              ? "调整课程" : CourseDiagnosisQuestion.all[min(5, store.draft.step)].title
+          ).font(DS.font(min(34, max(22, geometry.size.width * 0.056)) * 0.8, weight: .bold))
+            .multilineTextAlignment(.center).frame(height: 44, alignment: .top)
+          flowTop(step: max(0, store.draft.step), total: 6) { previous() }
+          if store.draft.step < 0 {
+            basicInformation
+          } else {
+            let question = CourseDiagnosisQuestion.all[min(5, store.draft.step)]
+            Spacer(minLength: 16)
+            VStack(spacing: 28) {
+              CourseBadgeIcon(name: question.icon, index: 3, size: 48)
+              // The original flow exposes the question as a group label and keeps the canvas focused on the choices.
+              CourseChoicesLayout(
+                columns: question.options.count == 5
+                  || (geometry.size.width <= 600 && question.multiple)
+                  ? 2 : geometry.size.width <= 600 ? 1 : nil
+              ) {
+                ForEach(question.options, id: \.0) { value, label, icon in
+                  CourseChoice(
+                    label: label,
+                    selected: store.draft.diagnosis[question.id]?.contains(value) == true,
+                    icon: icon, illustrated: true,
+                    toneIndex: question.options.firstIndex { $0.0 == value } ?? 0
+                  ) {
+                    store.draft.diagnosis[question.id] = question.toggle(
+                      value, in: store.draft.diagnosis[question.id] ?? [])
+                    error = nil
+                    store.persist()
+                  }
+                }
+              }.accessibilityElement(children: .contain).accessibilityLabel(question.title)
+            }
+            Spacer(minLength: 24)
+          }
+          VStack(spacing: 12) {
+            if let error { Text(error).font(DS.font(14)).foregroundStyle(DS.danger) }
+            CourseFlowPrimaryButton(
+              title: saving ? "正在准备课程…" : store.draft.step < 5 ? "下一页" : completionTitle
+            ) { next() }.clipShape(Capsule()).disabled(saving)
+              .accessibilityIdentifier("courseSetup.next")
+            if store.draft.editingCourseID != nil {
+              BCButton("返回课程，草稿已保存", style: .text) {
+                store.persist()
+                store.back()
+              }
+            }
+          }
+        }.frame(maxWidth: 560).frame(
+          minHeight: max(440, geometry.size.height - (store.isPad ? 56 : 40))
+        ).padding(
+          .horizontal, 20
+        ).padding(.top, store.isPad ? 42 : 4).padding(.bottom, 20).frame(maxWidth: .infinity)
+      }.scrollDismissesKeyboard(.interactively)
+    }.fileImporter(
+      isPresented: $selectingFile, allowedContentTypes: CourseUploadView.allowedTypes,
+      allowsMultipleSelection: true
+    ) { result in
+      Task { @MainActor in
+        switch result {
+        case .success(let urls):
+          for url in urls {
+            await store.importFile(url)
+            if let issue = store.importError {
+              error = issue
+              return
+            }
+          }
+          if let id = store.draft.resourceIDs.last { store.selectSource(id) }
+          store.replace(.courseSetup)
+        case .failure(let issue): error = issue.localizedDescription
+        }
+      }
+    }
+  }
+  private var completionTitle: String {
+    if store.draft.editingCourseID != nil { return "保存，返回课程" }
+    if store.draft.catalogBookID != nil { return "完成，导入课程" }
+    return "完成问卷，查看课程目录"
+  }
+  private var basicInformation: some View {
+    @Bindable var store = store
+    return VStack(alignment: .leading, spacing: 16) {
+      StickerIcon("BookOpen", size: 48).frame(maxWidth: .infinity)
+      Text("课程名称").font(DS.font(14, weight: .bold))
+      BCTextField("例如：期末生物复习", text: $store.draft.name)
+      CourseSectionHeading(title: "加入书籍资料", detail: "至少一份")
+      ForEach(store.sources) { source in
+        CourseChoice(
+          label: source.summary.title, selected: store.draft.resourceIDs.contains(source.id),
+          icon: "book", labelSize: 16
+        ) {
+          if store.draft.resourceIDs.contains(source.id) {
+            store.draft.resourceIDs.removeAll { $0 == source.id }
+          } else {
+            store.draft.resourceIDs.append(source.id)
+          }
+          store.persist()
+        }
+      }
+      BCButton("添加本地资料", icon: "doc.badge.plus", style: .secondary) { selectingFile = true }
+    }
+  }
+  private func previous() {
+    error = nil
+    if store.draft.step > 0 {
+      store.draft.step -= 1
+    } else if store.draft.step == 0 && store.draft.editingCourseID != nil {
+      store.draft.step = -1
+    } else {
+      store.back()
+    }
+    store.persist()
+  }
+  private func next() {
+    if store.draft.step < 0 {
+      guard !store.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        error = "请填写课程名称"
+        return
+      }
+      guard !store.draft.resourceIDs.isEmpty else {
+        error = "请至少选择或添加一份书籍资料"
+        return
+      }
+      store.draft.step = 0
+      return
+    }
+    let question = CourseDiagnosisQuestion.all[min(5, store.draft.step)]
+    guard !(store.draft.diagnosis[question.id]?.isEmpty ?? true) else {
+      error = "请至少选择一项再继续"
+      return
+    }
+    error = nil
+    if store.draft.step < 5 {
+      withAnimation { store.draft.step += 1 }
+      store.persist()
+      return
+    }
+    saving = true
+    if store.draft.editingCourseID != nil {
+      store.createCourse(
+        name: store.draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
+        resourceIDs: store.draft.resourceIDs, diagnosis: store.draft.diagnosis)
+      store.replace(.courseDetail)
+    } else if let catalogID = store.draft.catalogBookID,
+      let book = store.community.first(where: { $0.id == catalogID })
+    {
+      store.importCommunity(book)
+      store.replace(.communityImport)
+    } else {
+      store.replace(.chapterConfirm)
+    }
+    saving = false
+  }
+}
+
+struct CourseUploadView: View {
+  var addingToCurrentCourse = false
+  @Environment(AppStore.self) private var store
+  @State private var files: [URL] = []
+  @State private var pickerOpen = false
+  @State private var busy = false
+  @State private var error: String?
+  static var allowedTypes: [UTType] {
+    [
+      .pdf, .image, .plainText, .commaSeparatedText, .presentation, .spreadsheet,
+      UTType(filenameExtension: "docx") ?? .data, .data,
+    ]
+  }
+  var body: some View {
+    GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 24) {
+          fileTiles
+          if !files.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+              ForEach(Array(files.enumerated()), id: \.offset) { index, url in
+                Text("\(index + 1). \(url.lastPathComponent)").font(DS.font(14)).frame(
+                  maxWidth: .infinity, alignment: .leading)
+              }
+            }
+          }
+          Text("添加课程资料").font(DS.font(16, weight: .bold))
+          if let error = error ?? store.importError {
+            Text(error).font(DS.font(14)).foregroundStyle(DS.danger).accessibilityIdentifier(
+              "upload.error")
+          }
+          BCButton(busy ? "正在整理…" : "保存资料并继续") { saveFiles() }.disabled(files.isEmpty || busy)
+            .accessibilityIdentifier("upload.save")
+          if !addingToCurrentCourse && !store.draft.resourceIDs.isEmpty {
+            BCButton("继续设置课程", style: .secondary) {
+              store.go(store.draft.parseCompleted ? .courseSetup : .parseReady)
+            }
+          }
+        }
+        .frame(maxWidth: 560).padding(.horizontal, min(40, max(24, geometry.size.width * 0.08)))
+        .padding(.top, 48).padding(.bottom, 40)
+        .frame(maxWidth: .infinity).frame(
+          minHeight: addingToCurrentCourse ? 420 : geometry.size.height, alignment: .top
+        )
+        .background(
+          DS.surface,
+          in: UnevenRoundedRectangle(
+            topLeadingRadius: addingToCurrentCourse ? 0 : 54,
+            topTrailingRadius: addingToCurrentCourse ? 0 : 54))
+      }.background(addingToCurrentCourse ? DS.surface : Color(hex: 0xDCCAFA))
+    }
+    .fileImporter(
+      isPresented: $pickerOpen, allowedContentTypes: Self.allowedTypes,
+      allowsMultipleSelection: true
+    ) { result in
+      switch result {
+      case .success(let urls):
+        files.append(contentsOf: urls)
+        error = nil
+        store.importError = nil
+      case .failure(let issue): error = issue.localizedDescription
+      }
+    }
+  }
+  private var fileTiles: some View {
+    Group {
+      if files.isEmpty {
+        Button {
+          pickerOpen = true
+        } label: {
+          Image(systemName: "plus").font(.system(size: 38, weight: .medium)).foregroundStyle(
+            DS.text
+          )
+          .frame(width: 210, height: 210).background(
+            DS.surface, in: RoundedRectangle(cornerRadius: 18)
+          )
+          .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0xE1E6EE), lineWidth: 1.5))
+          .shadow(color: DS.text.opacity(0.12), radius: 14, x: 0, y: 12)
+        }.buttonStyle(.plain).disabled(busy).accessibilityLabel("选择课程资料").accessibilityIdentifier(
+          "upload.select")
+      } else {
+        LazyVGrid(
+          columns: [GridItem(.adaptive(minimum: 48, maximum: 48))], alignment: .leading, spacing: 16
+        ) {
+          ForEach(Array(files.enumerated()), id: \.offset) { index, url in
+            ZStack(alignment: .topTrailing) {
+              StickerIcon("FileText", size: 48)
+                .overlay(alignment: .bottomTrailing) {
+                  Text("\(index + 1)").font(DS.font(10, weight: .bold)).foregroundStyle(.white)
+                    .frame(minWidth: 18, minHeight: 18).background(DS.primary, in: Circle())
+                    .overlay(Circle().stroke(.white, lineWidth: 2)).offset(x: 2, y: 2)
+                }
+              Button {
+                files.remove(at: index)
+              } label: {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(
+                  .white
+                ).frame(width: 14, height: 14).background(DS.danger, in: Circle()).frame(
+                  width: 32, height: 32)
+              }.buttonStyle(.plain).disabled(busy).accessibilityLabel("移除 \(url.lastPathComponent)")
+                .offset(x: 12, y: -12)
+            }
+          }
+          Button {
+            pickerOpen = true
+          } label: {
+            Image(systemName: "plus").font(.system(size: 28)).foregroundStyle(DS.text).frame(
+              width: 44, height: 44)
+          }.buttonStyle(.plain).disabled(busy).accessibilityLabel("继续添加资料")
+        }.padding(20).frame(width: 228).frame(minHeight: 210, alignment: .topLeading)
+          .background(DS.surface, in: RoundedRectangle(cornerRadius: 18))
+          .overlay(RoundedRectangle(cornerRadius: 18).stroke(DS.primarySoft, lineWidth: 1.5))
+          .shadow(color: DS.primaryPressed.opacity(0.14), radius: 14, x: 0, y: 12)
+      }
+    }.padding(.top, 16).padding(.bottom, 6)
+  }
+  private func saveFiles() {
+    guard !files.isEmpty else { return }
+    busy = true
+    error = nil
+    let targetCourseID = addingToCurrentCourse ? store.currentCourse?.id : nil
+    let originalDraft = store.draft
+    Task { @MainActor in
+      if targetCourseID != nil { store.draft = CourseDraft() }
+      var issues: [String] = []
+      for url in files {
+        await store.importFile(url)
+        if let issue = store.importError {
+          issues.append("\(url.lastPathComponent)：\(issue)")
+          continue
+        }
+        if let id = store.draft.resourceIDs.last {
+          store.selectSource(id)
+          if let targetCourseID { store.addSource(id, to: targetCourseID) }
+        }
+      }
+      if issues.isEmpty {
+        await store.processImport()
+        if let issue = store.importError { issues.append(issue) }
+      }
+      busy = false
+      if !issues.isEmpty {
+        error = issues.joined(separator: "；")
+        if targetCourseID != nil {
+          store.draft = originalDraft
+          store.persist()
+        }
+        return
+      }
+      if store.draft.name.isEmpty {
+        store.draft.name = files.first?.deletingPathExtension().lastPathComponent ?? "我的课程"
+      }
+      files = []
+      store.persist()
+      if targetCourseID != nil {
+        store.draft = originalDraft
+        store.persist()
+        store.closeSheet()
+        store.showToast("资料已添加，可以继续学习")
+      } else {
+        store.draft.step = max(0, store.draft.step)
+        store.persist()
+        store.go(.courseSetup)
+      }
+    }
+  }
+}
+
+struct CourseParseReadyView: View {
+  @Environment(AppStore.self) private var store
+  private var fileKind: String {
+    let ext = store.importedFileURL?.pathExtension.lowercased() ?? "pdf"
+    return ext == "pdf" ? "PDF 教材" : ext.uppercased()
+  }
+  private var fileSize: String {
+    guard let url = store.importedFileURL,
+      let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+    else { return "0 B" }
+    return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+  }
+  private var title: String {
+    let filename =
+      store.importedFileURL?.lastPathComponent ?? store.currentSource?.summary.filename
+      ?? store.currentTitle
+    let value = (filename as NSString).deletingPathExtension
+    return value.components(separatedBy: CharacterSet(charactersIn: "（(")).first ?? value
+  }
+
+  var body: some View {
+    if let source = store.currentSource {
+      CourseCoverToContent(
+        cover: source.summary.cover_url ?? "/assets/brand/cloud-mascot-home.png", parsing: true
+      ) {
+        HStack(spacing: 6) {
+          StickerIcon("CheckCircle2", size: 24)
+          Text("已上传 · 待解析").font(DS.font(20)).foregroundStyle(DS.primaryPressed)
+        }.frame(maxWidth: .infinity)
+        Text(title).font(DS.font(20.8, weight: .bold)).multilineTextAlignment(.center).frame(
+          maxWidth: 220)
+        Text(
+          "\(fileKind) · \(fileSize)"
+            + (ProcessInfo.processInfo.arguments.contains("--fixture") ? " · 17:41" : "")
+        ).font(DS.font(20)).foregroundStyle(DS.secondary)
+        HStack(spacing: 10) {
+          metric("文件类型", value: fileKind)
+          metric("文件大小", value: fileSize)
+          metric("下一步", value: "后台解析")
+        }.padding(.top, 14)
+        if let issue = store.importError {
+          Text(issue).font(DS.font(14)).foregroundStyle(DS.danger)
+        }
+      } action: {
+        BCButton(
+          store.draft.parseCompleted ? "填写学习方式问卷" : store.importError == nil ? "开始解析" : "重新解析"
+        ) {
+          if store.draft.parseCompleted {
+            store.draft.step = 0
+            store.go(.courseSetup)
+          } else {
+            store.go(.processing)
+          }
+        }.accessibilityIdentifier("parse.start")
+      }
+    } else {
+      CourseFeaturePage {
+        EmptyStateView(title: "还没有选择学习资料", message: "先上传 PDF、图片或文档，再进入解析确认。")
+        BCButton("去上传", icon: "folder") { store.replace(.upload) }
+      }
+    }
+  }
+  private func metric(_ label: String, value: String) -> some View {
+    VStack(spacing: 6) {
+      Text(value).font(DS.font(20, weight: .bold)).foregroundStyle(DS.primary)
+      Text(label).font(DS.font(14)).foregroundStyle(DS.secondary)
+    }.frame(maxWidth: .infinity).frame(height: 82).background(
+      DS.surface, in: RoundedRectangle(cornerRadius: 14)
+    ).overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
+  }
+}
+
+struct CourseProcessingView: View {
+  var importing = false
+  @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var started = false
+  @State private var importStage = 0
+  private var stages: [String] {
+    importing
+      ? ["整理课程资料", "识别章节与重点", "结合学习偏好", "安排学习计划", "准备学习内容"]
+      : ["读取资料与版面", "识别目录与正文", "保存课程资料", "整理检索片段", "准备学习内容"]
+  }
+  private var progress: Double {
+    importing
+      ? Double(importStage) / 5
+      : min(
+        1, store.processingProgress > 1 ? store.processingProgress / 100 : store.processingProgress)
+  }
+  private var activeStage: Int {
+    if ProcessInfo.processInfo.arguments.contains("--visual-baseline") { return importing ? -1 : 0 }
+    return progress <= 0 ? -1 : min(4, Int(progress * 5))
+  }
+  var body: some View {
+    GeometryReader { geometry in
+      let screenHeight = geometry.size.height + (store.isPad ? 130 : 144)
+      let spriteWidth = min(208, max(168, geometry.size.width * 0.46))
+      let primaryHeight = max(min(256, max(208, screenHeight * 0.26)), spriteWidth * 4 / 3)
+      let flowHeight = max(0, screenHeight - 144)
+      let free = max(
+        0, (flowHeight - primaryHeight - 344 - (importing ? 0 : 96)) / (importing ? 2 : 3))
+      ScrollView {
+        VStack(spacing: 0) {
+          CourseSpriteStrip(
+            path: "/assets/brand/loading/cloud-course-loading-strip-v1.png", duration: 1.2,
+            loops: true
+          )
+          .frame(width: spriteWidth, height: spriteWidth * 4 / 3).offset(y: -40)
+          .frame(maxWidth: .infinity).frame(height: primaryHeight + free, alignment: .top)
+          VStack(spacing: 12) {
+            VStack(spacing: 8) {
+              ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+                let done = index < activeStage || progress >= 1
+                let active = index == activeStage && progress < 1
+                HStack(spacing: 10) {
+                  Group {
+                    if done {
+                      StickerIcon("CheckCircle2", tone: "mint", size: 30)
+                    } else {
+                      Text("\(index + 1)").font(DS.font(20, weight: .bold)).foregroundStyle(
+                        active ? DS.primaryPressed : DS.muted
+                      ).frame(width: 30, height: 30).background(DS.background, in: Circle())
+                    }
+                  }.frame(width: 30, height: 30)
+                  Text(stage).font(DS.font(16, weight: .bold)).frame(
+                    maxWidth: .infinity, alignment: .leading)
+                  Text(done ? "已完成" : active ? "处理中" : "等待中").font(DS.font(14, weight: .bold))
+                    .foregroundStyle(done ? DS.mint : active ? DS.primaryPressed : DS.muted)
+                }.padding(.horizontal, 12).frame(height: 48).background(
+                  active ? Color(hex: 0xFAF7FF) : DS.surface, in: RoundedRectangle(cornerRadius: 12)
+                ).overlay(
+                  RoundedRectangle(cornerRadius: 12).stroke(
+                    active ? Color(hex: 0xDDD6FE) : DS.border))
+              }
+            }.padding(8).background(Color(hex: 0xF4F7FB), in: RoundedRectangle(cornerRadius: 14))
+            Text(store.importError ?? (importing ? "正在为你整理资料，准备专属学习之旅…" : store.processingMessage))
+              .font(DS.font(20)).foregroundStyle(store.importError == nil ? DS.muted : DS.danger)
+              .multilineTextAlignment(.center).frame(minHeight: 44).padding(.horizontal, 8)
+              .accessibilityAddTraits(.updatesFrequently)
+          }.frame(height: 344 + free, alignment: .top)
+          if !importing {
+            Group {
+              if store.importError != nil {
+                BCButton("返回重新解析", style: .secondary) { store.replace(.parseReady) }
+              } else if progress >= 1 {
+                BCButton("填写学习方式问卷") {
+                  store.draft.step = 0
+                  store.go(.courseSetup)
+                }
+              } else {
+                Button {
+                  store.go(.home)
+                } label: {
+                  Text("后台运行，先回首页").font(DS.font(20, weight: .bold)).foregroundStyle(
+                    DS.primaryPressed
+                  ).frame(maxWidth: .infinity).frame(height: 56).background(
+                    DS.primarySoft, in: Capsule()
+                  ).overlay(Capsule().stroke(Color(hex: 0xDDD6FE)))
+                }.buttonStyle(.plain)
+              }
+            }.padding(.top, min(40, max(24, screenHeight * 0.04))).frame(
+              height: 96 + free, alignment: .top)
+          }
+        }.frame(maxWidth: 704).padding(.horizontal, min(32, max(16, geometry.size.width * 0.04)))
+          .padding(.top, min(24, max(12, geometry.size.width * 0.025))).frame(maxWidth: .infinity)
+      }
+    }
+    .task {
+      guard !started else { return }
+      started = true
+      if importing {
+        if ProcessInfo.processInfo.arguments.contains("--fixture") {
+          importStage = 2
+          return
+        }
+        for step in 1...5 {
+          if !reduceMotion { try? await Task.sleep(for: .milliseconds(360)) }
+          guard !Task.isCancelled else { return }
+          importStage = step
+        }
+        store.replace(.courseImportReady)
+      } else if !store.draft.parseCompleted {
+        await store.processImport()
+      }
+    }
+  }
+}
+
+struct CourseChapterConfirmationView: View {
+  @Environment(AppStore.self) private var store
+  @State private var expanded: Set<String> = []
+  @State private var error: String?
+  var body: some View {
+    CourseFeaturePage(width: 920, useSourceLayoutTop: true) {
+      BCCard {
+        HStack(alignment: .top, spacing: 14) {
+          AssetImage(store.currentSource?.summary.cover_url ?? "").frame(width: 68, height: 90)
+            .clipped().clipShape(RoundedRectangle(cornerRadius: 5))
+          VStack(alignment: .leading, spacing: 8) {
+            BCPill("本次文件解析结果")
+            Text(
+              ((store.currentSource?.summary.filename ?? store.currentTitle) as NSString)
+                .deletingPathExtension.components(separatedBy: CharacterSet(charactersIn: "（("))
+                .first ?? store.currentTitle
+            ).font(DS.font(20.8, weight: .bold))
+            Text(
+              "已识别 \(store.chapters.count) 个目录项 · \(store.currentSource?.summary.page_count ?? 0) 页 · 平均置信度 \(Int((store.chapters.map(\.confidence).reduce(0, +) / Double(max(1, store.chapters.count))).rounded()))%"
+            ).font(DS.font(14)).foregroundStyle(DS.secondary)
+          }
+          Spacer(minLength: 0)
+        }
+      }
+      HStack {
+        Text("本次解析目录").font(DS.font(20.8, weight: .bold))
+        Spacer()
+        Text("\(store.chapters.filter { $0.parent_id == nil }.count) 章").font(DS.font(14))
+          .foregroundStyle(DS.secondary)
+      }
+      if store.chapters.isEmpty { EmptyStateView(title: "尚未识别到章节", message: "返回检查资料内容后重新解析。") }
+      ForEach(store.chapters) { chapter in
+        if chapter.parent_id == nil || expanded.contains(chapter.parent_id ?? "")
+          || chapter.level == 1
+        {
+          HStack(spacing: 10) {
+            if store.chapters.contains(where: { $0.parent_id == chapter.id }) {
+              Button {
+                withAnimation {
+                  if expanded.contains(chapter.id) {
+                    expanded.remove(chapter.id)
+                  } else {
+                    expanded.insert(chapter.id)
+                  }
+                }
+              } label: {
+                Image(systemName: expanded.contains(chapter.id) ? "chevron.down" : "chevron.right")
+                  .frame(width: 44, height: 44)
+              }.buttonStyle(.plain)
+            } else {
+              Color.clear.frame(width: 12)
+            }
+            Button {
+              store.selectedChapterID = chapter.id
+              store.openSheet(.editChapter)
+            } label: {
+              VStack(alignment: .leading, spacing: 6) {
+                Text(chapter.title).font(DS.font(16, weight: .bold))
+                HStack {
+                  Text(
+                    chapter.page_start < 1 || chapter.page_end < chapter.page_start
+                      ? "原文页码待补充" : "PDF \(chapter.page_start)–\(chapter.page_end) 页")
+                  Text(chapter.status)
+                }.font(DS.font(14)).foregroundStyle(DS.secondary)
+              }.frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(.plain).accessibilityIdentifier("chapter.edit.\(chapter.id)")
+            Image(systemName: "pencil").font(.system(size: 15)).foregroundStyle(DS.secondary)
+          }.padding(8).padding(.leading, CGFloat(max(0, chapter.level - 1)) * 14).background(
+            Color(hex: 0xF6F8FC), in: RoundedRectangle(cornerRadius: 14)
+          ).overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
+        }
+      }
+      if let error { Text(error).font(DS.font(14)).foregroundStyle(DS.danger) }
+
+    }.safeAreaInset(edge: .bottom, spacing: 0) {
+      VStack(spacing: 6) {
+        BCButton("确认生成课程") {
+          guard !store.chapters.isEmpty else {
+            error = "请至少保留一个章节"
+            return
+          }
+          store.confirmChapters()
+        }.frame(maxWidth: store.isPad ? 460 : .infinity).disabled(store.chapters.isEmpty)
+          .accessibilityIdentifier("chapters.confirm")
+      }.padding(12).frame(maxWidth: .infinity).background(
+        DS.surface.opacity(0.94), in: RoundedRectangle(cornerRadius: store.isPad ? 20 : 0)
+      ).overlay(
+        RoundedRectangle(cornerRadius: store.isPad ? 20 : 0).stroke(
+          store.isPad ? DS.border : .clear)
+      ).shadow(color: DS.text.opacity(store.isPad ? 0.12 : 0), radius: 15, x: 0, y: 6).padding(
+        .horizontal, store.isPad ? 32 : 16
+      ).padding(.bottom, store.isPad ? 20.85 : 6)
+    }
+  }
+}
+
+struct CourseCompletionView: View {
+  var imported = false
+  var community = false
+  @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var phase = 0
+  private var completionAnnouncement: String {
+    if community, let book = store.community.first(where: { $0.id == store.selectedCommunityID }) {
+      return
+        "导入成功。《\(book.title)》已加入你的课程，可在课程中继续添加教材和文件。\(book.chapters.count) 个目录项，\(book.flashcardCount) 张概念闪卡。"
+    }
+    return imported
+      ? "资料已整理好，专属学习计划也准备好了。" : "已将《\(store.currentTitle)》编排为 \(store.lessons.count) 节 AI 课时。"
+  }
+  var body: some View {
+    GeometryReader { geometry in
+      let screenHeight = geometry.size.height + (store.isPad ? 130 : 144)
+      let layout = min(24, max(12, geometry.size.width * 0.025))
+      let compact = !store.isPad && geometry.size.width > screenHeight && screenHeight < 600
+      let spriteWidth = compact ? 144 : store.isPad ? 216 : min(192, geometry.size.width * 0.52)
+      let bottom: CGFloat = store.isPad ? 12 : 34
+      let focusHeight = screenHeight - (store.isPad ? 24 : 62) - (store.isPad ? 0 : 34) - layout * 2
+      let stageHeight =
+        compact
+        ? 256
+        : max(
+          store.isPad ? 512 : screenHeight <= 720 ? 392 : min(528, max(432, screenHeight * 0.66)),
+          focusHeight - 120 - bottom)
+      let sceneTop = compact ? 8 : min(52, max(24, screenHeight * 0.05))
+      let copyTop: CGFloat =
+        compact
+        ? 164
+        : store.isPad ? 284 : screenHeight <= 720 ? 212 : min(276, max(236, screenHeight * 0.31))
+      ScrollView {
+        Group {
+          if compact {
+            HStack(spacing: 16) {
+              completionStage(
+                width: spriteWidth, height: stageHeight, sceneTop: sceneTop, copyTop: copyTop,
+                screenHeight: screenHeight)
+              completionActions
+            }
+          } else {
+            VStack(spacing: 0) {
+              completionStage(
+                width: spriteWidth, height: stageHeight, sceneTop: sceneTop, copyTop: copyTop,
+                screenHeight: screenHeight)
+              completionActions.frame(maxWidth: store.isPad ? 448 : .infinity)
+            }
+          }
+        }.padding(.bottom, bottom).frame(maxWidth: store.isPad ? 608 : 544).padding(
+          .horizontal, min(32, max(16, geometry.size.width * 0.04))
+        ).padding(.top, layout).frame(maxWidth: .infinity)
+      }
+    }.task {
+      if reduceMotion {
+        phase = 3
+        return
+      }
+      try? await Task.sleep(for: .milliseconds(900))
+      guard !Task.isCancelled else { return }
+      withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.45)) { phase = 1 }
+      try? await Task.sleep(for: .milliseconds(450))
+      guard !Task.isCancelled else { return }
+      withAnimation(.easeOut(duration: 0.18)) { phase = 2 }
+      try? await Task.sleep(for: .milliseconds(200))
+      guard !Task.isCancelled else { return }
+      withAnimation(.easeOut(duration: 0.18)) { phase = 3 }
+    }.onChange(of: reduceMotion) { _, reduced in if reduced { phase = 3 } }
+  }
+  private var completionActions: some View {
+    VStack(spacing: 12) {
+      BCButton("进入学习") { store.replace(store.currentSource == nil ? .courseDetail : .study) }
+      BCButton("查看学习计划", style: .secondary) { store.replace(.plan) }
+    }.opacity(phase >= 3 || reduceMotion ? 1 : 0).allowsHitTesting(phase >= 3 || reduceMotion)
+  }
+  private func completionStage(
+    width: CGFloat, height: CGFloat, sceneTop: CGFloat, copyTop: CGFloat, screenHeight: CGFloat
+  ) -> some View {
+    ZStack(alignment: .top) {
+      Group {
+        if phase == 0 && !reduceMotion {
+          CourseSpriteStrip(
+            path: "/assets/brand/success/cloud-mascot-success-strip-v1.png", duration: 0.9,
+            loops: false)
+        } else {
+          AssetImage("/assets/brand/cloud-mascot-success-transparent-v1.png").frame(
+            width: width, height: width * 784 / 1158, alignment: .top)
+        }
+      }.frame(width: width, height: width * 4 / 3, alignment: .top)
+        .scaleEffect(phase == 0 && !reduceMotion ? 1.24 : 1, anchor: UnitPoint(x: 0.5, y: 0.45))
+        .offset(
+          y: sceneTop + (phase == 0 && !reduceMotion ? min(140, max(108, screenHeight * 0.16)) : 0))
+      if phase >= 2 || reduceMotion {
+        StickerIcon("CheckCircle2", tone: "mint", size: 32, glyphSize: 24).offset(y: copyTop)
+          .accessibilityLabel(completionAnnouncement).transition(
+            .opacity.combined(with: .scale(scale: 0.85)))
+      }
+    }.frame(maxWidth: .infinity).frame(height: height, alignment: .top)
+  }
+
+}
+
+/// Uses the original eight-frame 3:4 artwork. SwiftUI only changes which frame is clipped.
+private struct CourseSpriteStrip: View {
+  let path: String
+  let duration: Double
+  let loops: Bool
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var epoch = Date()
+  var body: some View {
+    if reduceMotion {
+      GeometryReader { geometry in
+        AssetImage(path, contentMode: .fill).frame(
+          width: geometry.size.width * 8, height: geometry.size.height
+        ).frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
+          .clipped()
+      }
+    } else {
+      TimelineView(.animation(minimumInterval: duration / 8)) { timeline in
+        let elapsed = max(0, timeline.date.timeIntervalSince(epoch))
+        let frame = loops ? Int(elapsed / duration * 8) % 8 : min(7, Int(elapsed / duration * 7))
+        GeometryReader { geometry in
+          AssetImage(path, contentMode: .fill)
+            .frame(width: geometry.size.width * 8, height: geometry.size.height)
+            .offset(x: -CGFloat(frame) * geometry.size.width)
+        }.clipped()
+      }
+    }
+  }
+}
+
+/// The source uses centered flex-wrap, including a centered fifth option.
+private struct CourseChoicesLayout: Layout {
+  var columns: Int?
+  var spacing: CGFloat = 10
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? 560
+    let rows = arrange(width: width, subviews: subviews)
+    return CGSize(width: width, height: rows.last.map { $0.y + $0.height } ?? 0)
+  }
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    for row in arrange(width: bounds.width, subviews: subviews) {
+      var x = bounds.minX + (bounds.width - row.width) / 2
+      for item in row.items {
+        subviews[item.index].place(
+          at: CGPoint(x: x, y: bounds.minY + row.y), anchor: .topLeading,
+          proposal: ProposedViewSize(width: item.width, height: row.height))
+        x += item.width + spacing
+      }
+    }
+  }
+  private struct Row {
+    var items: [(index: Int, width: CGFloat)]
+    var width: CGFloat
+    var height: CGFloat
+    var y: CGFloat
+  }
+  private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+    var result: [Row] = []
+    var row = Row(items: [], width: 0, height: 68, y: 0)
+    for index in subviews.indices {
+      let ideal = subviews[index].sizeThatFits(.unspecified)
+      let itemWidth =
+        columns.map { (width - CGFloat($0 - 1) * spacing) / CGFloat($0) }
+        ?? min(width, max(135, ideal.width))
+      if !row.items.isEmpty && row.width + spacing + itemWidth > width + 0.5 {
+        result.append(row)
+        row = Row(items: [], width: 0, height: 68, y: row.y + row.height + spacing)
+      }
+      row.width += (row.items.isEmpty ? 0 : spacing) + itemWidth
+      row.height = max(
+        row.height,
+        subviews[index].sizeThatFits(ProposedViewSize(width: itemWidth, height: nil)).height)
+      row.items.append((index, itemWidth))
+    }
+    if !row.items.isEmpty { result.append(row) }
+    return result
+  }
+}
+
+private struct CourseFlowPrimaryButton: View {
+  let title: String
+  let action: () -> Void
+  @Environment(\.isEnabled) private var enabled
+  var body: some View {
+    Button(action: action) {
+      Text(title).font(DS.font(20, weight: .bold)).multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity).frame(minHeight: 54)
+        .foregroundStyle(enabled ? .white : DS.secondary)
+        .background(enabled ? DS.primary : DS.border, in: Capsule())
+    }.buttonStyle(BCPressStyle())
+  }
+}
