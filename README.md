@@ -38,7 +38,7 @@ mkdir -p output
 xcrun simctl io SIMULATOR_UDID screenshot output/lesson.png
 ```
 
-没有指定 `--device` 时脚本优先选择已启动的 iOS 模拟器；多人或多任务测试应始终显式指定 UDID。脚本不会抹除设备或删除应用数据。`--fixture-session` 相同名称会重用该测试会话的临时数据库；需要全新场景时换一个名称。`--fixture` 强制离线助手，即使本机配置了个人在线 key。还支持 `--book`、`--sheet` 等固定场景参数；具体路径与入口见 [数据与复现](docs/DATA_AND_REPRODUCIBILITY.md)。
+没有指定 `--device` 时脚本优先选择已启动的 iOS 模拟器；多人或多任务测试应始终显式指定 UDID。脚本不会抹除设备或删除应用数据。找不到Simulator图形应用时仍通过simctl安装和启动，适用于命令行环境。`--fixture-session` 相同名称会重用该测试会话的临时数据库；需要全新场景时换一个名称。`--fixture` 强制离线助手，即使本机配置了个人在线 key。还支持 `--book`、`--sheet` 等固定场景参数；具体路径与入口见 [数据与复现](docs/DATA_AND_REPRODUCIBILITY.md)。
 
 可用环境变量 `BOOKCOURSE_DERIVED_DATA`、`BOOKCOURSE_PACKAGES`、`BOOKCOURSE_CONFIGURATION` 调整本地构建缓存目录与配置。结果目录必须是尚未存在的路径。测试应同时覆盖 iPhone 和 iPad，最低 iOS 17 与当前可用系统分别回归；仓库中的可运行工程不代表已经在每一个系统版本与真机上验证。
 

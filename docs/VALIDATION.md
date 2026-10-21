@@ -18,7 +18,7 @@
 | iOS17 runtime实际运行 | 未执行 | 本机只有26/27运行时，部署目标与Mach-O检查不等于17运行通过 |
 | 实体麦克风/Apple Pencil | 未执行 | 模拟器样例音频和手指PKDrawing不替代实体录音/Pencil测试 |
 
-最终模拟器App debug dylib SHA256：`a688efdb792cd648deda7dc097ca23db30fa06f91fe6fa28c211423038badc54`。功能代码冻结后完成上述统一回归；之后只更新文档、证据和Git提交。
+最终模拟器App debug dylib SHA256：`a688efdb792cd648deda7dc097ca23db30fa06f91fe6fa28c211423038badc54`。功能代码冻结后完成上述统一回归；之后仅更新文档、证据和启动脚本的Simulator图形界面回退处理；App产物未变。启动脚本随后已分别在iPhone和iPad安装并启动相同产物，见[最终启动记录](../References/Validation/final-simulator-launches.json)。本机未提供Simulator GUI，脚本通过simctl完成运行。
 
 ## 单元／集成覆盖
 
