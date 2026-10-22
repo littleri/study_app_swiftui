@@ -154,17 +154,20 @@ import SwiftUI
     set { assistantState.chatLoading = newValue }
   }
   @ObservationIgnored let repository: LocalBookCourseRepository
-  @ObservationIgnored private var filePaths: [String: String] = [:]
-  @ObservationIgnored private var persistTask: Task<Void, Never>?
+  @ObservationIgnored var filePaths: [String: String] = [:]
+  @ObservationIgnored var persistTask: Task<Void, Never>?
   @ObservationIgnored private var processTask: Task<Void, Never>?
   @ObservationIgnored private var processGeneration = UUID()
   @ObservationIgnored private var toastTask: Task<Void, Never>?
   @ObservationIgnored private var creditReservations: [String: Int] = [:]
   @ObservationIgnored private var creditRevision = 0
-  @ObservationIgnored private var selectionGeneration = 0
+  @ObservationIgnored var selectionGeneration = 0
   @ObservationIgnored let assistant: AssistantService
-  init(repository: LocalBookCourseRepository) {
+  @ObservationIgnored var cloud: CloudAPI?
+  let cloudState = CloudState()
+  init(repository: LocalBookCourseRepository, cloud: CloudAPI? = nil) {
     self.repository = repository
+    self.cloud = cloud
     self.assistant = AssistantService()
   }
   var currentCourse: Course? { courses.first { $0.id == selectedCourseID } }
@@ -202,6 +205,10 @@ import SwiftUI
   var locationKey: String { "\(selectedCourseID ?? "")::\(selectedBookID ?? "")" }
   /// Reload the bundled discovery catalog while preserving the view's search and category.
   func refreshCommunity() async throws {
+    if cloud != nil {
+      try await refreshCloudCatalog()
+      return
+    }
     let refreshed = try await Task.detached(priority: .userInitiated) {
       try ContentBundle.load([CommunityBook].self, name: "community")
     }.value
@@ -211,6 +218,10 @@ import SwiftUI
 
   func boot() async {
     guard isLoading else { return }
+    if cloud != nil {
+      await bootCloud()
+      return
+    }
     let clock = ContinuousClock()
     let minimumSplashDeadline = clock.now.advanced(by: .milliseconds(500))
     var startupError: String?
@@ -249,13 +260,13 @@ import SwiftUI
       applyCredits(ledger)
       try await repository.seedDemoNotesIfNeeded()
       notes = try await repository.loadNotes()
-      route = preferences == nil ? .onboarding : .home
+      route = preferences?.hasCompletedOnboarding == true ? .home : .onboarding
       if importJob?.status == .running {
         importJob?.status = .interrupted
         importJob?.message = "上次整理中断，原文件已保留，请继续整理"
         importError = importJob?.message
         processingMessage = importJob?.message ?? "整理中断"
-        if preferences != nil { route = .parseReady }
+        if preferences?.hasCompletedOnboarding == true { route = .parseReady }
       }
       seedMistakeIfNeeded()
       let arguments = ProcessInfo.processInfo.arguments
@@ -459,10 +470,15 @@ import SwiftUI
       location?.lessonID ?? lessons.first(where: { $0.chapter_id == selectedChapterID })?.id
     chatMessages = []
     persist()
+    if cloud != nil {
+      cloudState.recordsTask?.cancel()
+      cloudState.recordsTask = Task { await reloadCloudLearningRecords() }
+    }
   }
   func selectCourse(_ courseID: String) {
     guard let course = courses.first(where: { $0.id == courseID }) else { return }
     selectedCourseID = courseID
+    if cloud != nil { installCloudSources(workspaceID: courseID) }
     if let book = course.activeResourceID ?? course.resourceIDs.first {
       selectSource(book)
     } else {
@@ -473,6 +489,10 @@ import SwiftUI
     persist()
   }
   func openLesson(_ lesson: Lesson) {
+    if cloud != nil, lesson.status == "pending" {
+      Task { await beginCloudLearning(chapterID: lesson.chapter_id) }
+      return
+    }
     if selectedBookID != lesson.book_id { selectSource(lesson.book_id) }
     selectedChapterID = lesson.chapter_id
     selectedLessonID = lesson.id
@@ -480,6 +500,17 @@ import SwiftUI
     go(.lesson)
   }
   func openSource(_ target: SourcePageTarget) {
+    if cloud != nil, sourceFileURL(target.bookID) == nil,
+      sources.first(where: { $0.id == target.bookID })?.summary.content_mode != "catalog"
+    {
+      Task {
+        do {
+          try await ensureCloudPDF(bookID: target.bookID)
+          openSource(target)
+        } catch { handleCloudError(error) }
+      }
+      return
+    }
     guard sources.contains(where: { $0.id == target.bookID }) else {
       showToast("这份资料尚未导入")
       return
@@ -513,15 +544,23 @@ import SwiftUI
         bookID: citation.bookID, title: citation.chapterTitle, page: citation.page,
         printedPage: citation.printedPage, sourceText: citation.quote, from: route))
   }
-  func completeOnboarding(name: String, goal: String?, dailyTime: String?) {
+  func completeOnboarding(
+    name: String, goal: String?, dailyTime: String?, learningBarriers: [String] = [],
+    guidanceStyles: [String] = [], planningSupport: String? = nil
+  ) {
     guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     preferences = LearnerPreferences(
       displayName: name.trimmingCharacters(in: .whitespacesAndNewlines), primaryGoal: goal,
-      dailyTime: dailyTime)
+      dailyTime: dailyTime, learningBarriers: learningBarriers,
+      guidanceStyles: guidanceStyles, planningSupport: planningSupport)
     persist()
     replace(.home)
   }
   func logout() {
+    if cloud != nil {
+      Task { await logoutCloud() }
+      return
+    }
     preferences = nil
     sheet = nil
     path = []
@@ -529,6 +568,14 @@ import SwiftUI
     route = .onboarding
   }
   func createCourse(name: String, resourceIDs: [String], diagnosis: [String: [String]] = [:]) {
+    if cloud != nil {
+      Task {
+        do {
+          try await saveCloudCourse(name: name, resourceIDs: resourceIDs, diagnosis: diagnosis)
+        } catch { handleCloudError(error) }
+      }
+      return
+    }
     let validIDs = Array(NSOrderedSet(array: resourceIDs)) as? [String] ?? resourceIDs
     if let edit = draft.editingCourseID, let i = courses.firstIndex(where: { $0.id == edit }) {
       courses[i].name = name
@@ -548,6 +595,10 @@ import SwiftUI
     persist()
   }
   func removeCourse(_ id: String) {
+    if cloud != nil {
+      Task { await removeCloudCourse(id) }
+      return
+    }
     guard let removed = courses.first(where: { $0.id == id }) else { return }
     dismissedSourceIDs.formUnion(removed.resourceIDs)
     courses.removeAll { $0.id == id }
@@ -558,6 +609,10 @@ import SwiftUI
     persist()
   }
   func addSource(_ bookID: String, to courseID: String?) {
+    if cloud != nil {
+      Task { await addCloudResource(bookID: bookID, workspaceID: courseID) }
+      return
+    }
     guard sources.contains(where: { $0.id == bookID }) else { return }
     if let id = courseID ?? selectedCourseID, let i = courses.firstIndex(where: { $0.id == id }) {
       if !courses[i].resourceIDs.contains(bookID) { courses[i].resourceIDs.append(bookID) }
@@ -570,6 +625,10 @@ import SwiftUI
     }
   }
   func removeSource(_ bookID: String, from courseID: String) {
+    if cloud != nil {
+      Task { await removeCloudResource(bookID: bookID, workspaceID: courseID) }
+      return
+    }
     guard let i = courses.firstIndex(where: { $0.id == courseID }) else { return }
     courses[i].resourceIDs.removeAll { $0 == bookID }
     if courses[i].activeResourceID == bookID {
@@ -622,6 +681,10 @@ import SwiftUI
     persist()
   }
   func importFile(_ url: URL) async {
+    if cloud != nil {
+      await importCloudPDF(url)
+      return
+    }
     let requestGeneration = selectionGeneration
     importError = nil
     do {
@@ -646,6 +709,10 @@ import SwiftUI
     }
   }
   func processImport() async {
+    if cloud != nil {
+      await processCloudImport()
+      return
+    }
     if ProcessInfo.processInfo.arguments.contains("--fixture"),
       !draft.resourceIDs.contains(where: { $0.hasPrefix("book_local_") })
     {
@@ -707,6 +774,17 @@ import SwiftUI
     if processGeneration == generation { processTask = nil }
   }
   func cancelImport() {
+    if let cloud {
+      let books = importJob?.bookIDs ?? []
+      Task {
+        for bookID in books {
+          do {
+            let _: CloudOK = try await cloud.request(
+              "/api/native/books/\(bookID)/cancel", method: "POST")
+          } catch { self.handleCloudError(error) }
+        }
+      }
+    }
     processTask?.cancel()
     processTask = nil
     processGeneration = UUID()
@@ -718,6 +796,10 @@ import SwiftUI
     persist()
   }
   func confirmChapters() {
+    if cloud != nil {
+      Task { await confirmCloudChapters() }
+      return
+    }
     if let book = selectedBookID, let chapters = chapterDrafts[book],
       let index = sources.firstIndex(where: { $0.id == book })
     {
@@ -789,6 +871,10 @@ import SwiftUI
     mastered.contains("\(selectedBookID ?? "")::\(questionID)")
   }
   func submitAssignment(question: QuizQuestion, answer: String) {
+    if cloud != nil {
+      Task { await submitCloudAssignment(question: question, answer: answer) }
+      return
+    }
     assignmentAnswer = answer
     let section =
       currentSource?.quizzes.filter { $0.chapter_id == question.chapter_id } ?? [question]
@@ -878,19 +964,39 @@ import SwiftUI
   func saveNote(_ note: StudyNote) async throws {
     var updated = note
     updated.updatedAt = .now
+    if cloud != nil {
+      if let index = notes.firstIndex(where: { $0.id == updated.id }) {
+        notes[index] = updated
+      } else {
+        notes.append(updated)
+      }
+      persistCloud()
+      await persistTask?.value
+      return
+    }
     try await repository.saveNote(updated)
     await reloadNotes()
   }
   func deleteNote(_ id: String) async {
+    if cloud != nil {
+      notes.removeAll { $0.id == id }
+      persistCloud()
+      return
+    }
     do {
       try await repository.deleteNote(id)
       await reloadNotes()
     } catch { showToast(error.localizedDescription) }
   }
   func reloadNotes() async {
+    if cloud != nil { return }
     do { notes = try await repository.loadNotes() } catch { showToast(error.localizedDescription) }
   }
-  func sourceFileURL(_ bookID: String) -> URL? { filePaths[bookID].map(repository.attachmentURL) }
+  func sourceFileURL(_ bookID: String) -> URL? {
+    guard let relative = filePaths[bookID] else { return nil }
+    let url = repository.attachmentURL(relative)
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  }
   func attachmentURL(_ relative: String) -> URL { repository.attachmentURL(relative) }
   func saveAttachment(_ data: Data, extension ext: String) async throws -> String {
     try await repository.saveAttachment(data, extension: ext)
@@ -917,6 +1023,10 @@ import SwiftUI
     }
   }
   func ask(_ question: String) async {
+    if cloud != nil {
+      await askCloud(question)
+      return
+    }
     guard !chatLoading, !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       return
     }
@@ -945,7 +1055,7 @@ import SwiftUI
     }
     chatLoading = false
   }
-  private func snapshot() -> AppSnapshot {
+  func snapshot() -> AppSnapshot {
     AppSnapshot(
       importJob: importJob, chapterDrafts: chapterDrafts, preferences: preferences, draft: draft,
       courses: courses,
@@ -954,6 +1064,10 @@ import SwiftUI
       mistakes: mistakes, dismissedSourceIDs: dismissedSourceIDs)
   }
   func persist() {
+    if cloud != nil {
+      persistCloud()
+      return
+    }
     let snapshot = snapshot()
     let sourceSnapshot = sources
     let previous = persistTask
@@ -965,7 +1079,14 @@ import SwiftUI
       } catch { self.showToast(error.localizedDescription) }
     }
   }
-  func flush() async { await persistTask?.value }
+  func flush() async {
+    await persistTask?.value
+    if cloud != nil {
+      await cloudState.recordsTask?.value
+      while let task = cloudState.syncTask { await task.value }
+      await persistTask?.value
+    }
+  }
   func makeSampleCourse() {
     if let c = courses.first(where: { $0.resourceIDs.contains("book_biology_2") }) {
       selectCourse(c.id)

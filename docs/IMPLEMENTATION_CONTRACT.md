@@ -1,5 +1,7 @@
 # Shared implementation contract
 
+P0 cloud integration supersedes the original offline-by-default runtime choice: normal app launches use a configurable FastAPI endpoint; `--fixture` retains the original independent offline contract. See `CLOUD_INTEGRATION.md`. Existing view entry points, routes and animations remain; CloudAPI/CloudMapping/CloudStore adapt server-owned data without exposing answer keys.
+
 Source: original React CURRENT working tree, with exact revision/provenance recorded in `References/`. Native repository is independent. iOS17, SwiftUI; source repository read-only. No WebView, no external backend by default. Source content and custom assets are preserved. The user later canceled pixel-for-pixel styling parity; current acceptance covers usable functional flows and animations. This is the original shared feature contract, with final state/transaction additions below; actual Swift definitions are authoritative.
 
 ## Feature entry points

@@ -42,10 +42,6 @@ struct CourseDiscoveryView: View {
                   EmptyStateView(
                     title: "没有找到相关课程", message: "换个关键词，或查看其他课程分类。",
                     asset: "/assets/brand/empty-states/no-results-v1.png")
-                  BCButton("清除搜索", style: .secondary) {
-                    query = ""
-                    category = "推荐"
-                  }
                 }
                 LazyVGrid(
                   columns: [
@@ -61,6 +57,7 @@ struct CourseDiscoveryView: View {
                     } label: {
                       CommunityCourseTile(book: book)
                     }.buttonStyle(.plain).accessibilityLabel("\(book.title)，\(book.subject)，查看课程")
+                      .accessibilityIdentifier("community.course.\(book.id)")
                   }
                 }
               }.frame(maxWidth: 820, alignment: .leading)
@@ -236,8 +233,12 @@ struct CommunityBookDetailView: View {
             Text(book.description).font(DS.font(20)).lineSpacing(7).frame(
               maxWidth: .infinity, alignment: .leading)
           } else {
-            comment("周", name: "周同学", text: "重点整理得很清楚，适合复习\(book.catalogTitle)。")
-            comment("陈", name: "陈同学", text: "课程结构简洁，导入后继续学习很方便。")
+            if store.cloud != nil {
+              Text("暂无评论").font(DS.font(14)).foregroundStyle(DS.secondary)
+            } else {
+              comment("周", name: "周同学", text: "重点整理得很清楚，适合复习\(book.catalogTitle)。")
+              comment("陈", name: "陈同学", text: "课程结构简洁，导入后继续学习很方便。")
+            }
           }
         }
       } action: {
@@ -279,6 +280,10 @@ struct LearnerProfileView: View {
   @State private var name = ""
   @State private var goal = ""
   @State private var dailyTime = ""
+  @State private var learningBarriers: [String] = []
+  @State private var guidanceStyles: [String] = []
+  @State private var planningSupport = ""
+  @State private var savingPreferences = false
   private var tasks: [StudyTask] {
     store.sources.filter { store.currentCourse?.resourceIDs.contains($0.id) == true }.flatMap {
       $0.plan.tasks
@@ -488,10 +493,50 @@ struct LearnerProfileView: View {
       } label: {
         preferenceLabel(CourseOptions.times.first { $0.0 == dailyTime }?.1 ?? "暂不设置（默认 45 分钟）")
       }.accessibilityLabel("每日学习时间")
+      preferenceMultiMenu("学习卡点", options: CourseOptions.barriers, selection: $learningBarriers)
+      preferenceMultiMenu("帮助方式", options: CourseOptions.guidance, selection: $guidanceStyles)
+      Text("计划支持").font(DS.font(14, weight: .bold))
+      Menu {
+        Button("暂不设置") { planningSupport = "" }
+        ForEach(CourseOptions.planning, id: \.0) { value, label, _ in
+          Button(label) { planningSupport = value }
+        }
+      } label: {
+        preferenceLabel(CourseOptions.planningLabel(planningSupport))
+      }.accessibilityLabel("计划支持")
       HStack {
         BCButton("取消", style: .secondary) { editing = false }
-        BCButton("保存偏好") { savePreferences() }
+        BCButton(savingPreferences ? "正在保存…" : "保存偏好") { savePreferences() }
       }
+    }.disabled(savingPreferences)
+  }
+  private func preferenceMultiMenu(
+    _ title: String, options: [(String, String, String)], selection: Binding<[String]>
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("\(title) · 最多两项").font(DS.font(14, weight: .bold))
+      Menu {
+        Button("暂不设置") { selection.wrappedValue = [] }
+        ForEach(options, id: \.0) { value, label, _ in
+          Button {
+            if selection.wrappedValue.contains(value) {
+              selection.wrappedValue.removeAll { $0 == value }
+            } else if selection.wrappedValue.count < 2 {
+              selection.wrappedValue.append(value)
+            } else {
+              store.showToast("最多选择两项，可先取消一项")
+            }
+          } label: {
+            if selection.wrappedValue.contains(value) {
+              Label(label, systemImage: "checkmark")
+            } else {
+              Text(label)
+            }
+          }
+        }
+      } label: {
+        preferenceLabel(CourseOptions.selectionLabel(selection.wrappedValue, options: options))
+      }.accessibilityLabel(title)
     }
   }
   private func preferenceLabel(_ title: String) -> some View {
@@ -506,6 +551,9 @@ struct LearnerProfileView: View {
     name = store.preferences?.displayName ?? ""
     goal = store.preferences?.primaryGoal ?? ""
     dailyTime = store.preferences?.dailyTime ?? ""
+    learningBarriers = store.preferences?.learningBarriers ?? []
+    guidanceStyles = store.preferences?.guidanceStyles ?? []
+    planningSupport = store.preferences?.planningSupport ?? ""
     editing.toggle()
   }
   private func savePreferences() {
@@ -518,9 +566,29 @@ struct LearnerProfileView: View {
       store.showToast("称呼最多 30 个字符")
       return
     }
+    if store.cloud != nil {
+      guard !savingPreferences else { return }
+      savingPreferences = true
+      Task { @MainActor in
+        defer { savingPreferences = false }
+        do {
+          try await store.saveCloudPreferences(
+            name: clean, goal: goal.isEmpty ? nil : goal,
+            dailyTime: dailyTime.isEmpty ? nil : dailyTime, learningBarriers: learningBarriers,
+            guidanceStyles: guidanceStyles,
+            planningSupport: planningSupport.isEmpty ? nil : planningSupport)
+          editing = false
+          store.showToast("学习偏好已保存")
+        } catch { store.handleCloudError(error) }
+      }
+      return
+    }
     store.preferences?.displayName = clean
     store.preferences?.primaryGoal = goal.isEmpty ? nil : goal
     store.preferences?.dailyTime = dailyTime.isEmpty ? nil : dailyTime
+    store.preferences?.learningBarriers = learningBarriers
+    store.preferences?.guidanceStyles = guidanceStyles
+    store.preferences?.planningSupport = planningSupport.isEmpty ? nil : planningSupport
     store.persist()
     editing = false
     store.showToast("学习偏好已保存")
@@ -593,7 +661,9 @@ struct LearnerSettingsView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text(store.preferences?.displayName ?? "我的账号").font(DS.font(20.8, weight: .bold)).frame(
               height: 26, alignment: .top)
-            Text("当前账号").font(DS.font(20)).foregroundStyle(DS.secondary).frame(
+            Text(store.cloudState.localLogin ? "本地默认账号" : "当前账号").font(DS.font(20)).foregroundStyle(
+              DS.secondary
+            ).frame(
               height: 28, alignment: .top)
           }
           Spacer()
@@ -605,6 +675,16 @@ struct LearnerSettingsView: View {
           VStack(spacing: 0) {
             preferenceRow("主要学习目标", value: CourseOptions.goalLabel(store.preferences?.primaryGoal))
             preferenceRow("每日学习时间", value: CourseOptions.timeLabel(store.preferences?.dailyTime))
+            preferenceRow(
+              "学习卡点",
+              value: CourseOptions.selectionLabel(
+                store.preferences?.learningBarriers ?? [], options: CourseOptions.barriers))
+            preferenceRow(
+              "帮助方式",
+              value: CourseOptions.selectionLabel(
+                store.preferences?.guidanceStyles ?? [], options: CourseOptions.guidance))
+            preferenceRow(
+              "计划支持", value: CourseOptions.planningLabel(store.preferences?.planningSupport))
           }
         }
       }
@@ -623,14 +703,23 @@ struct LearnerSettingsView: View {
           .background(DS.surface, in: RoundedRectangle(cornerRadius: 14))
           .overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
         }.buttonStyle(.plain).accessibilityIdentifier("settings.logout")
-        Text("退出后，再次打开软件也需要重新完成引导。")
-          .font(DS.font(20)).lineSpacing(4).foregroundStyle(DS.secondary)
-          .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
+        Text(
+          store.cloud == nil
+            ? "退出后，再次打开软件也需要重新完成引导。"
+            : store.cloudState.localLogin ? "当前无需邮箱验证，退出后可直接重新进入本地默认账号。" : "退出后需要重新使用邮箱验证码登录。"
+        )
+        .font(DS.font(20)).lineSpacing(4).foregroundStyle(DS.secondary)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
       }.padding(.top, 8)
       SettingsSourceCard {
         VStack(alignment: .leading, spacing: 8) {
-          Text("本机学习数据").font(DS.font(20.8, weight: .bold)).frame(height: 26, alignment: .top)
-          Text("已保留 \(store.courses.count) 门课程。退出账号后，课程、资料和学习记录仍会保留，完成引导即可继续学习。").font(DS.font(20))
+          Text(store.cloud == nil ? "本机学习数据" : "账号学习数据").font(DS.font(20.8, weight: .bold)).frame(
+            height: 26, alignment: .top)
+          Text(
+            store.cloud == nil
+              ? "已保留 \(store.courses.count) 门课程。退出账号后，课程、资料和学习记录仍会保留，完成引导即可继续学习。"
+              : "已保存 \(store.courses.count) 门课程。课程与已同步进度保留在账号中；本机笔记暂时只保存在这台设备。待同步进度会在下次登录后继续上传。"
+          ).font(DS.font(20))
             .foregroundStyle(DS.secondary).lineSpacing(4).padding(.vertical, 2)
         }
       }
@@ -643,7 +732,12 @@ struct LearnerSettingsView: View {
               .foregroundStyle(DS.danger).frame(width: 50, height: 50).background(
                 DS.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
             Text("确认退出账号？").font(DS.font(20.8, weight: .bold))
-            Text("退出后需要重新填写称呼、学习目标和每日学习时间。已有课程、资料和学习记录会保留在本机。").font(DS.font(20)).foregroundStyle(
+            Text(
+              store.cloud == nil
+                ? "退出后需要重新完成个性化问题。已有课程、资料和学习记录会保留在本机。"
+                : store.cloudState.localLogin
+                  ? "已同步课程和学习进度会保留在本地默认账号中，可直接重新进入。" : "退出后需要重新使用邮箱验证码登录。已同步课程和学习进度会保留在账号中。"
+            ).font(DS.font(20)).foregroundStyle(
               DS.secondary
             ).lineSpacing(6)
             HStack {

@@ -52,16 +52,14 @@ struct CourseHomeView: View {
     }
   }
   private var emptyShelf: some View {
-    BCCard {
-      HStack(alignment: .top, spacing: 16) {
-        StickerIcon("BookOpenText", size: 44)
-        VStack(alignment: .leading, spacing: 10) {
-          Text("还没有课程").font(DS.font(16, weight: .bold))
-          Text("添加课程资料后，可以从原书位置继续学习。").font(DS.font(14)).foregroundStyle(DS.secondary)
-          BCButton("创建第一门课程", icon: "plus") { create() }
-        }
-      }
-    }
+    VStack(spacing: 8) {
+      EmptyStateView(
+        title: "开始你的第一门课程",
+        message: "添加课程资料后，可以从原书位置继续学习。",
+        asset: "/assets/brand/empty-states/home-no-courses-v1.png")
+      BCButton("创建课程", icon: "plus") { create() }
+        .accessibilityIdentifier("home.empty.create")
+    }.frame(maxWidth: 720).frame(maxWidth: .infinity)
   }
   private var showcase: some View {
     GeometryReader { geometry in

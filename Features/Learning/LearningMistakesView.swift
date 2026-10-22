@@ -15,7 +15,7 @@ struct LearningMistakesView: View {
   private let reasons = ["知识盲区", "审题疏忽", "概念混淆", "方法不熟"]
 
   private var mistakes: [MistakeRecord] {
-    store.mistakes.filter { $0.book_id == store.selectedBookID }
+    store.mistakes.filter { $0.book_id == store.selectedBookID && ($0.course_id == nil || $0.course_id == store.selectedCourseID) }
   }
   private var visible: [MistakeRecord] {
     mistakes.filter { mistake in

@@ -167,20 +167,61 @@ struct LearnerOnboardingDraft: Codable, Equatable {
   var name = ""
   var goal: String?
   var dailyTime: String?
+  var learningBarriers: [String] = []
+  var guidanceStyles: [String] = []
+  var planningSupport: String?
+  static let stepCount = 6
   static let storageKey = "bookcourse.native-onboarding-draft.v1"
-  static func load(defaults: UserDefaults = .standard) -> Self {
-    guard let data = defaults.data(forKey: storageKey),
+
+  init(
+    step: Int = 0, name: String = "", goal: String? = nil, dailyTime: String? = nil,
+    learningBarriers: [String] = [], guidanceStyles: [String] = [], planningSupport: String? = nil
+  ) {
+    self.step = step
+    self.name = name
+    self.goal = goal
+    self.dailyTime = dailyTime
+    self.learningBarriers = learningBarriers
+    self.guidanceStyles = guidanceStyles
+    self.planningSupport = planningSupport
+  }
+  private enum CodingKeys: String, CodingKey {
+    case step, name, goal, dailyTime, learningBarriers, guidanceStyles, planningSupport
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    step = try values.decodeIfPresent(Int.self, forKey: .step) ?? 0
+    name = try values.decodeIfPresent(String.self, forKey: .name) ?? ""
+    goal = try values.decodeIfPresent(String.self, forKey: .goal)
+    dailyTime = try values.decodeIfPresent(String.self, forKey: .dailyTime)
+    learningBarriers = try values.decodeIfPresent([String].self, forKey: .learningBarriers) ?? []
+    guidanceStyles = try values.decodeIfPresent([String].self, forKey: .guidanceStyles) ?? []
+    planningSupport = try values.decodeIfPresent(String.self, forKey: .planningSupport)
+  }
+  static func load(
+    defaults: UserDefaults = .standard, scope: String? = nil, preferences: LearnerPreferences? = nil
+  ) -> Self {
+    guard let data = defaults.data(forKey: scope.map { storageKey + "." + $0 } ?? storageKey),
       var value = try? JSONDecoder().decode(Self.self, from: data)
-    else { return Self() }
-    value.step = min(2, max(0, value.step))
+    else {
+      return Self(
+        step: preferences.map { $0.hasCompletedOnboarding ? 0 : 3 } ?? 0,
+        name: preferences?.displayName ?? "", goal: preferences?.primaryGoal,
+        dailyTime: preferences?.dailyTime, learningBarriers: preferences?.learningBarriers ?? [],
+        guidanceStyles: preferences?.guidanceStyles ?? [],
+        planningSupport: preferences?.planningSupport)
+    }
+    value.step = min(stepCount - 1, max(0, value.step))
     value.name = String(value.name.prefix(30))
     return value
   }
-  func save(defaults: UserDefaults = .standard) {
-    if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.storageKey) }
+  func save(defaults: UserDefaults = .standard, scope: String? = nil) {
+    if let data = try? JSONEncoder().encode(self) {
+      defaults.set(data, forKey: scope.map { Self.storageKey + "." + $0 } ?? Self.storageKey)
+    }
   }
-  static func clear(defaults: UserDefaults = .standard) {
-    defaults.removeObject(forKey: storageKey)
+  static func clear(defaults: UserDefaults = .standard, scope: String? = nil) {
+    defaults.removeObject(forKey: scope.map { storageKey + "." + $0 } ?? storageKey)
   }
 }
 

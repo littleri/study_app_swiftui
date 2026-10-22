@@ -102,12 +102,39 @@ final class CourseTests: XCTestCase {
     let suite = "BookCourseTests.Onboarding." + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
-    let draft = LearnerOnboardingDraft(step: 2, name: "学习者", goal: "exam", dailyTime: "30to60")
-    draft.save(defaults: defaults)
+    let draft = LearnerOnboardingDraft(
+      step: 5, name: "学习者", goal: "exam", dailyTime: "30to60",
+      learningBarriers: ["understanding", "memory"], guidanceStyles: ["examples", "stepByStep"],
+      planningSupport: "collaborative")
+    draft.save(defaults: defaults, scope: "account-a")
     let reopened = UserDefaults(suiteName: suite)!
-    XCTAssertEqual(LearnerOnboardingDraft.load(defaults: reopened), draft)
-    LearnerOnboardingDraft.clear(defaults: reopened)
+    XCTAssertEqual(LearnerOnboardingDraft.load(defaults: reopened, scope: "account-a"), draft)
+    XCTAssertEqual(
+      LearnerOnboardingDraft.load(defaults: reopened, scope: "account-b"), LearnerOnboardingDraft())
+    LearnerOnboardingDraft.clear(defaults: reopened, scope: "account-a")
     XCTAssertEqual(LearnerOnboardingDraft.load(defaults: defaults), LearnerOnboardingDraft())
+  }
+  func testLegacyPreferencesAndDraftResumeWithoutLosingOriginalAnswers() throws {
+    let legacy = try JSONDecoder().decode(
+      LearnerPreferences.self,
+      from: Data(#"{"displayName":"已有学习者","primaryGoal":"exam","dailyTime":"under30"}"#.utf8))
+    XCTAssertFalse(legacy.hasCompletedOnboarding)
+    XCTAssertEqual(legacy.learningBarriers, [])
+    let suite = "BookCourseTests.LegacyOnboarding." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let resumed = LearnerOnboardingDraft.load(defaults: defaults, preferences: legacy)
+    XCTAssertEqual(resumed.step, 3)
+    XCTAssertEqual(resumed.name, "已有学习者")
+    XCTAssertEqual(resumed.goal, "exam")
+    XCTAssertEqual(resumed.dailyTime, "under30")
+    let originalDraft = Data(
+      #"{"step":2,"name":"草稿学习者","goal":"interest","dailyTime":"30to60"}"#.utf8)
+    defaults.set(originalDraft, forKey: LearnerOnboardingDraft.storageKey)
+    let restoredDraft = LearnerOnboardingDraft.load(defaults: defaults, preferences: legacy)
+    XCTAssertEqual(restoredDraft.step, 2)
+    XCTAssertEqual(restoredDraft.name, "草稿学习者")
+    XCTAssertEqual(restoredDraft.guidanceStyles, [])
   }
   func testHomeNextStepPrioritizesSavedSectionThenUnfinishedPlanAndSkipsContainers() throws {
     var source = try ContentBundle.load([SourceContent].self, name: "sources")[0]

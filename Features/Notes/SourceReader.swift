@@ -1086,7 +1086,7 @@ struct NotesRegionAIView: View {
     request = Task { @MainActor in
       var reservation: String?
       do {
-        reservation = try await store.reserveCredits(1)
+        if store.cloud == nil { reservation = try await store.reserveCredits(1) }
         reservationID = reservation
         try Task.checkCancellation()
         if question.trimmingCharacters(in: .whitespacesAndNewlines) == input { question = "" }
@@ -1094,7 +1094,7 @@ struct NotesRegionAIView: View {
         await persistConversation()
         let context = note.map { "文字批注：\($0.body)\n" } ?? ""
         let contextualQuestion = "\(input)\n\(context)（PDF 第 \(page) 页；当前页文字上下文：\(String(pageText.prefix(1200)))）"
-        let result = try await store.assistant.ask(question: contextualQuestion, bookID: bookID,
+        let result = try await store.answerAssistant(question: contextualQuestion, bookID: bookID,
           bookIDs: sourceBookIDs, chapterID: chapterID, sources: sources, history: history)
         try Task.checkCancellation()
         guard store.selectedCourseID == courseID, store.selectedBookID == selectedBookID else {

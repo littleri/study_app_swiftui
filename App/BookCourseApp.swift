@@ -9,6 +9,13 @@ import UIKit
     do {
       let args = ProcessInfo.processInfo.arguments
       let directory: URL?
+      #if DEBUG
+        let cloudSession = args.firstIndex(of: "--cloud-test-session").flatMap {
+          args.indices.contains($0 + 1) ? args[$0 + 1] : nil
+        }
+      #else
+        let cloudSession: String? = nil
+      #endif
       if let i = args.firstIndex(of: "--data-directory"), args.indices.contains(i + 1) {
         directory = URL(fileURLWithPath: args[i + 1], isDirectory: true)
       } else if args.contains("--fixture") {
@@ -16,11 +23,13 @@ import UIKit
         let session = i.flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } ?? "default"
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(
           "VisualFixtures/" + session, isDirectory: true)
+      } else if let cloudSession {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("CloudUITests/" + cloudSession, isDirectory: true)
       } else {
         directory = nil
       }
       self._store = State(
-        initialValue: AppStore(repository: try LocalBookCourseRepository(directory: directory)))
+        initialValue: AppStore(repository: try LocalBookCourseRepository(directory: directory), cloud: CloudAPI.configured()))
     } catch { startupError = error.localizedDescription }
   }
   var body: some Scene {

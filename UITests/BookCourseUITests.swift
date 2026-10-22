@@ -314,7 +314,7 @@ final class BookCourseUITests: XCTestCase {
     XCTAssertEqual(search.value as? String, "不存在的课程xyz")
     XCTAssertEqual(scroll.value as? String, "课程已更新")
     XCTAssertTrue(app.staticTexts["没有找到相关课程"].exists)
-    app.buttons["清除搜索"].tap()
+    app.buttons["清除搜索内容"].tap()
     XCTAssertTrue(app.buttons.matching(
       NSPredicate(format: "label CONTAINS %@", "查看课程")).firstMatch.isHittable)
     keepScreenshot("discovery-refresh-restored", app: app)

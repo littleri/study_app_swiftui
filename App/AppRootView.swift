@@ -66,7 +66,7 @@ struct AppRootView: View {
               height: geometry.size.height + geometry.safeAreaInsets.top
                 + geometry.safeAreaInsets.bottom), safeArea: geometry.safeAreaInsets,
             navHeight: usesNativeTabs(pad: pad)
-              ? 0 : (!pad && store.route.showsPrimaryNavigation) ? 72 : 0,
+              ? (nativeTabContentBottom == nil ? 49 : 0) : (!pad && store.route.showsPrimaryNavigation) ? 72 : 0,
             navigationTop: usesNativeTabs(pad: pad) ? nativeTabContentBottom : nil,
             lessonEntry: store.route == .lesson,
             top: store.route == .lesson ? $lessonAssistantTop : $assistantTop,
@@ -130,12 +130,34 @@ struct AppRootView: View {
         store.isPad = pad
         FixtureOrientation.apply()
       }
+      .overlay {
+        if store.cloud != nil, !store.cloudState.authenticated, !store.isLoading {
+          CloudAccountView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+      }
+      .overlay(alignment: .top) {
+        if store.cloudState.isWorking, store.cloudState.authenticated, !store.cloudState.showDiagnosis {
+          ProgressView("正在同步学习资料…").padding(14).background(DS.surface, in: Capsule()).padding(.top, 8)
+        } else if store.cloudState.authenticated, let error = store.cloudState.syncError {
+          Button {
+            Task { await store.retryCloudConnection() }
+          } label: {
+            Label("进度待同步 · 重试", systemImage: "arrow.triangle.2.circlepath")
+              .font(DS.font(13)).padding(12).background(DS.surface, in: Capsule())
+          }.padding(.top, 8).accessibilityLabel("进度待同步：\(error)，轻点重试")
+        }
+      }
       .onChange(of: pad) { _, value in store.isPad = value }
     }
     .background(pageBackground.ignoresSafeArea()).font(DS.font()).foregroundStyle(DS.text).tint(
       DS.primary
     )
-    .onChange(of: scenePhase) { _, phase in if phase != .active { store.persist() } }
+    .onChange(of: scenePhase) { _, phase in
+      if phase != .active { store.persist() } else { store.startCloudSync() }
+    }
+    .sheet(isPresented: Binding(get: { store.cloudState.showDiagnosis }, set: { store.cloudState.showDiagnosis = $0 })) {
+      CloudLearningSetupView().environment(store)
+    }
   }
   private var pageBackground: Color {
     switch store.route {
@@ -299,7 +321,7 @@ private final class TabBarConfigurationView: UIView {
           }
         }
         let top = bar.convert(bar.bounds, to: window).minY
-        if top > 0, lastTop == nil || abs((lastTop ?? 0) - top) > 0.5 {
+        if top > 0, onTopChange != nil, lastTop == nil || abs((lastTop ?? 0) - top) > 0.5 {
           lastTop = top
           DispatchQueue.main.async { [weak self] in self?.onTopChange?(top) }
         }
@@ -571,7 +593,7 @@ struct FloatingAssistant: View {
           ? safeArea.leading
           : windowSize.width - safeArea.trailing - orbWidth + (lessonEntry ? 1 : 0))
           - geometry.frame(in: .global).minX + translation.width,
-        y: actualTop - geometry.frame(in: .global).minY + translation.height
+        y: min(maxTop, max(minTop, actualTop + translation.height)) - geometry.frame(in: .global).minY
       )
       .onTapGesture { store.globalAssistantOpen = true }
       .gesture(
@@ -616,7 +638,7 @@ struct AssistantChatView: View {
       GeometryReader { viewport in
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
-            Text("剩余 \(store.credits) 积分 · 每次提问消耗 1 积分").font(DS.font(20)).foregroundStyle(
+            Text(store.cloud == nil ? "剩余 \(store.credits) 积分 · 每次提问消耗 1 积分" : "基于当前教材原文回答").font(DS.font(20)).foregroundStyle(
               DS.secondary
             ).frame(height: 28, alignment: .top)
             if store.currentSource != nil {

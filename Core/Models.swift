@@ -270,9 +270,45 @@ struct Course: Codable, Identifiable, Hashable, Sendable {
   var updatedAt: Date = .now
 }
 struct LearnerPreferences: Codable, Hashable, Sendable {
+  static let currentOnboardingVersion = 2
   var displayName: String
   var primaryGoal: String?
   var dailyTime: String?
+  var learningBarriers: [String]
+  var guidanceStyles: [String]
+  var planningSupport: String?
+  var onboardingVersion: Int
+  var hasCompletedOnboarding: Bool { onboardingVersion >= Self.currentOnboardingVersion }
+
+  init(
+    displayName: String, primaryGoal: String?, dailyTime: String?,
+    learningBarriers: [String] = [], guidanceStyles: [String] = [],
+    planningSupport: String? = nil, onboardingVersion: Int = currentOnboardingVersion
+  ) {
+    self.displayName = displayName
+    self.primaryGoal = primaryGoal
+    self.dailyTime = dailyTime
+    self.learningBarriers = learningBarriers
+    self.guidanceStyles = guidanceStyles
+    self.planningSupport = planningSupport
+    self.onboardingVersion = onboardingVersion
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case displayName, primaryGoal, dailyTime, learningBarriers, guidanceStyles, planningSupport,
+      onboardingVersion
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    displayName = try values.decode(String.self, forKey: .displayName)
+    primaryGoal = try values.decodeIfPresent(String.self, forKey: .primaryGoal)
+    dailyTime = try values.decodeIfPresent(String.self, forKey: .dailyTime)
+    learningBarriers = try values.decodeIfPresent([String].self, forKey: .learningBarriers) ?? []
+    guidanceStyles = try values.decodeIfPresent([String].self, forKey: .guidanceStyles) ?? []
+    planningSupport = try values.decodeIfPresent(String.self, forKey: .planningSupport)
+    // An existing three-question profile resumes at the newly added questions.
+    onboardingVersion = try values.decodeIfPresent(Int.self, forKey: .onboardingVersion) ?? 1
+  }
 }
 struct CourseDraft: Codable, Hashable, Sendable {
   var name = ""
@@ -426,6 +462,7 @@ struct MistakeRecord: Codable, Identifiable, Hashable, Sendable {
   var next_review_at: String?
   var last_wrong_at: String?
   var mistake_reason: String?
+  var course_id: String?
   var id: String { mistake_id }
 }
 enum Route: String, Codable, CaseIterable, Identifiable, Sendable {

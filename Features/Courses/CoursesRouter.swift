@@ -135,12 +135,31 @@ struct CourseChoice: View {
 
 enum CourseOptions {
   static let goals: [(String, String, String)] = [
-    ("systematic", "系统学习", "LibraryBig"), ("exam", "备考冲刺", "Target"),
-    ("growth", "能力提升", "TrendingUp"), ("interest", "日常兴趣", "Heart"),
+    ("systematic", "系统掌握知识", "LibraryBig"), ("exam", "备考提升成绩", "Target"),
+    ("growth", "提升实际能力", "TrendingUp"), ("interest", "探索兴趣内容", "Heart"),
   ]
   static let times: [(String, String)] = [
     ("under30", "30分钟以内"), ("30to60", "30分钟-60分钟"), ("1to2h", "1-2小时"), ("over2h", "2小时以上"),
   ]
+  static let barriers: [(String, String, String)] = [
+    ("starting", "更容易开始", "Sparkles"), ("focus", "更专注投入", "Target"),
+    ("understanding", "更深入理解", "Lightbulb"), ("memory", "更牢固记忆", "BrainCircuit"),
+  ]
+  static let guidance: [(String, String, String)] = [
+    ("keyPoints", "抓住重点", "ListChecks"), ("principles", "讲透原理", "Lightbulb"),
+    ("examples", "结合示例", "BookOpenText"), ("stepByStep", "循序展开", "Layers3"),
+  ]
+  static let planning: [(String, String, String)] = [
+    ("selfDirected", "自主安排", "BookOpen"), ("collaborative", "共同规划", "CalendarCheck2"),
+    ("structured", "提供完整计划", "ListChecks"), ("explore", "先自由体验", "Sparkles"),
+  ]
+  static func selectionLabel(_ values: [String], options: [(String, String, String)]) -> String {
+    let labels = options.filter { values.contains($0.0) }.map(\.1)
+    return labels.isEmpty ? "暂未设置" : labels.joined(separator: "、")
+  }
+  static func planningLabel(_ value: String?) -> String {
+    planning.first { $0.0 == value }?.1 ?? "暂未设置"
+  }
   static func goalLabel(_ value: String?) -> String {
     goals.first { $0.0 == value }?.1 ?? "系统学习（默认）"
   }

@@ -131,6 +131,14 @@ actor LocalBookCourseRepository: BookCourseRepository, StudyNoteRepository {
   func saveSnapshot(_ snapshot: AppSnapshot) throws {
     try db.put("app", "state", encoder.encode(snapshot))
   }
+
+  func loadCloudState(_ key: String) throws -> CloudLocalSnapshot? {
+    guard let data = try db.get("cloud", key).first else { return nil }
+    return try decoder.decode(CloudLocalSnapshot.self, from: data)
+  }
+  func saveCloudState(_ value: CloudLocalSnapshot, key: String) throws {
+    try db.put("cloud", key, encoder.encode(value))
+  }
   func loadNotes() throws -> [StudyNote] {
     try db.get("note").map { try decoder.decode(StudyNote.self, from: $0) }.sorted {
       $0.updatedAt > $1.updatedAt

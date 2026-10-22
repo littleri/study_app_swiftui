@@ -20,6 +20,13 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>CloudPath 连接你配置的本地学习服务，用于登录、教材上传与学习进度同步。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CloudPath 使用麦克风录制语音笔记和教材语音批注，录音保存在本机。</string>
 	<key>UIAppFonts</key>

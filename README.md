@@ -1,5 +1,9 @@
 # CloudPath · SwiftUI
 
+**云端 P0 接入：** 普通启动连接可配置的 FastAPI 后端，默认 `http://127.0.0.1:8100`；本地开发默认直接登录，无需邮箱验证。已接入 PDF 上传/OCR、个人目录、多资料课程、真实诊断、章节课程、教材答疑与学习进度恢复；OCR 和模型未配置时会明确提示所缺服务。原有界面与动效保留，`--fixture` 继续使用独立离线场景。启动配置、外部模型依赖及验收边界见 [原生云端接入](docs/CLOUD_INTEGRATION.md)。
+
+首次登录会展示称呼、学习目标、每日时间、学习卡点、帮助方式、计划支持六步个性化问题，支持草稿恢复及个人页修改。旧账号保留原答案，从新增问题继续。“发现”已接入原项目生物课程，可导入 15 个课时、90 张闪卡和 45 道练习，无需先安装 OCR 模型；原文查看使用已有的 125 张教材页图片。
+
 独立的原生 iPhone / iPad 前端，最低 iOS 17。采用 SwiftUI、PDFKit、PencilKit、AVFAudio 和本地 SQLite；教材检索使用原生 ONNX Runtime。页面、弹层、颜色、字体、图标与示例文案以原 React 项目当前工作区为依据，参考截图在 `References/VisualBaselines/`。应用运行和日常构建均不需要原仓库、Node.js、Vite 或 WebView。
 
 按最新要求，本次以**功能流程与动效完整可用**作为验收标准，不再进行与原网页一比一或逐像素还原。已有视觉参考只用于追溯；实际功能验证与平台限制见 [验证记录](docs/VALIDATION.md)。
@@ -67,7 +71,7 @@ xcrun simctl io SIMULATOR_UDID screenshot output/lesson.png
 - [真实能力、演示能力与已知资源缺失](docs/FEATURE_BOUNDARIES.md)
 - [第三方许可与模型来源](THIRD_PARTY_NOTICES.md)
 
-默认无需 API key。离线助手从可靠原文片段生成摘录式回答，无证据时不附教材页码。可选在线助手的个人 key 仅通过设备 Keychain 或进程环境变量 `BOOKCOURSE_DEEPSEEK_API_KEY` 提供；不要写入资源、源码或提交的 scheme。可在 Xcode 的本机运行配置设置环境变量。在线请求会向外部服务发送会话与检索到的教材片段，应只在自己决定启用后使用。当前请求格式以 `Core/AssistantService.swift` 为准。
+普通账号模式使用自己的后端，模型配置与密钥由服务器管理。离线 fixtures 无需 API key，助手从可靠原文片段生成摘录式回答，无证据时不附教材页码。原有个人调试路径仍支持通过设备 Keychain 或进程环境变量 `BOOKCOURSE_DEEPSEEK_API_KEY` 提供个人 key；不要写入资源、源码或提交的 scheme。账号模式不使用该个人 key，三个教材答疑入口均调用 FastAPI。
 
 解析中的取消操作使用 `cancelImport` 终止任务并使过期回调失效，原文件保留供重试。目录编辑先写入按书隔离的章节草稿，点击确认生成课程后才提交到资料目录；返回前一页不会提前覆盖已确认目录。六个独立状态域分别负责课程、学习会话、阅读、笔记、导入任务与助手会话，`AppStore` 统一协调路由和持久化。
 

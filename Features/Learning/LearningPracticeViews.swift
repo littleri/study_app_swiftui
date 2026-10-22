@@ -16,6 +16,10 @@ struct LearningAssignmentView: View {
   @State private var shortAnswer = ""
   @State private var error: String?
   @State private var submitting = false
+  @State private var cloudEventIDs: [String: String] = [:]
+  @State private var questionStarted = Date()
+  @State private var elapsed: [String: Double] = [:]
+  @State private var confidence = 0.6
 
   private var questions: [QuizQuestion] {
     store.quizzes.filter {
@@ -91,6 +95,12 @@ struct LearningAssignmentView: View {
                 if let error {
                   Text(error).font(DS.font(14)).foregroundStyle(DS.danger).accessibilityAddTraits(
                     .updatesFrequently)
+                }
+                if store.cloud != nil {
+                  VStack(alignment: .leading, spacing: 6) {
+                    Text("回答信心：\(Int(confidence * 100))%").font(DS.font(14)).foregroundStyle(DS.secondary)
+                    Slider(value: $confidence, in: 0...1)
+                  }
                 }
                 Spacer(minLength: 32)
                 HStack {
@@ -238,7 +248,9 @@ struct LearningAssignmentView: View {
         text: Binding(
           get: { shortAnswer },
           set: { value in
+            if store.cloud != nil, answers[question.id] != String(value.prefix(300)) { cloudEventIDs.removeValue(forKey: question.id) }
             shortAnswer = String(value.prefix(300))
+            if store.cloud != nil { answers[question.id] = shortAnswer }
             store.assignmentAnswer = shortAnswer
             error = nil
           }), placeholder: "在这里写下你的思路……"
@@ -248,6 +260,7 @@ struct LearningAssignmentView: View {
   }
 
   private func select(_ answer: String, question: QuizQuestion) {
+    if store.cloud != nil, answers[question.id] != answer { cloudEventIDs.removeValue(forKey: question.id) }
     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) { answers[question.id] = answer }
     error = nil
   }
@@ -256,10 +269,15 @@ struct LearningAssignmentView: View {
       error = "请先完成本题，再继续。"
       return
     }
+    if store.cloud != nil, let question { elapsed[question.id] = Date().timeIntervalSince(questionStarted) }
     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
       index = min(max(0, index + delta), questions.count - 1)
     }
     store.selectedQuizIndex = index
+    if store.cloud != nil {
+      questionStarted = Date()
+      shortAnswer = question.flatMap { answers[$0.id] } ?? ""
+    }
     error = nil
   }
   private func submit() {
@@ -275,6 +293,25 @@ struct LearningAssignmentView: View {
       return
     }
     guard let question else { return }
+    if store.cloud != nil {
+      if learningQuestionKind(question) == "short-answer" { answers[question.id] = shortAnswer }
+      if let missing = questions.firstIndex(where: { answers[$0.id]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }) {
+        index = missing; error = "请先完成这道题。"; return
+      }
+      elapsed[question.id] = Date().timeIntervalSince(questionStarted)
+      for item in questions where cloudEventIDs[item.id] == nil { cloudEventIDs[item.id] = UUID().uuidString }
+      let submissions = questions.map { item in
+        CloudPracticeAnswer(question: item, answer: answers[item.id] ?? "", eventID: cloudEventIDs[item.id]!,
+          seconds: elapsed[item.id] ?? 1, confidence: confidence)
+      }
+      submitting = true
+      Task { @MainActor in
+        defer { submitting = false }
+        do { try await store.submitCloudAssignments(submissions) }
+        catch { self.error = error.localizedDescription }
+      }
+      return
+    }
     submitting = true
     let judgment =
       questions.first { learningQuestionKind($0) == "judgment" }.flatMap { answers[$0.id] } ?? "未作答"

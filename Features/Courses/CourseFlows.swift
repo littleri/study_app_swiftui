@@ -7,23 +7,39 @@ struct LearnerOnboardingView: View {
   @State private var name = ""
   @State private var goal: String?
   @State private var dailyTime: String?
+  @State private var learningBarriers: [String] = []
+  @State private var guidanceStyles: [String] = []
+  @State private var planningSupport: String?
   @State private var error: String?
   @State private var restoredDraft = false
+  @State private var restoredScope: String?
   @State private var completed = false
+  @State private var saving = false
   @FocusState private var nameFocused: Bool
+  private let titles = [
+    "我们怎么称呼你？", "你希望通过学习收获什么？", "你每天可以投入多少学习时间？",
+    "学习时，你最想改善什么？", "你更喜欢怎样的学习引导？", "你希望怎样安排学习节奏？",
+  ]
+  private let icons = [
+    "Sparkles", "BookOpen", "Clock3", "BrainCircuit", "Lightbulb", "CalendarCheck2",
+  ]
+  private let tones = ["yellow", "blue", "peach", "mint", "yellow", "violet"]
+  private var lastStep: Int { LearnerOnboardingDraft.stepCount - 1 }
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
         VStack(spacing: 0) {
-          Text(["我们怎么称呼你", "你使用云径的主要目标是", "你每天能投入多少学习时间"][step]).font(
+          Text(titles[step]).font(
             DS.font(min(34, max(22, geometry.size.width * 0.056)) * 0.8, weight: .bold)
           ).multilineTextAlignment(.center).frame(height: 44, alignment: .top).padding(.bottom, 12)
-          flowTop(step: step, total: 3) { if step > 0 { step -= 1 } }
+          flowTop(step: step, total: LearnerOnboardingDraft.stepCount, hideBack: step == 0) {
+            guard step > 0, !saving else { return }
+            error = nil
+            withAnimation { step -= 1 }
+          }.disabled(saving)
           Spacer(minLength: 30)
           VStack(spacing: 28) {
-            StickerIcon(
-              step == 0 ? "Sparkles" : step == 1 ? "BookOpen" : "Clock3",
-              tone: step == 0 ? "yellow" : step == 1 ? "blue" : "peach", size: 48)
+            StickerIcon(icons[step], tone: tones[step], size: 48)
             if step == 0 {
               VStack(alignment: .leading, spacing: 8) {
                 Text("你的称呼").font(DS.font(20, weight: .bold)).foregroundStyle(DS.secondary).frame(
@@ -34,20 +50,13 @@ struct LearnerOnboardingView: View {
                   DS.surface, in: RoundedRectangle(cornerRadius: 16)
                 ).overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border)).focused(
                   $nameFocused
-                ).submitLabel(.next).onSubmit { next() }.onChange(of: name) { _, value in
-                  if value.count > 30 { name = String(value.prefix(30)) }
-                  error = nil
-                }
-              }
-            } else if step == 1 {
-              LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(CourseOptions.goals, id: \.0) { value, label, icon in
-                  CourseChoice(label: label, selected: goal == value, icon: icon, tall: true) {
-                    goal = value
+                ).accessibilityIdentifier("onboarding.name").submitLabel(.next).onSubmit { next() }
+                  .onChange(of: name) { _, value in
+                    if value.count > 30 { name = String(value.prefix(30)) }
+                    error = nil
                   }
-                }
-              }.accessibilityLabel("主要学习目标")
-            } else {
+              }
+            } else if step == 2 {
               LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(CourseOptions.times, id: \.0) { value, label in
                   Button {
@@ -62,27 +71,53 @@ struct LearnerOnboardingView: View {
                         RoundedRectangle(cornerRadius: 14).stroke(
                           dailyTime == value ? DS.primary : DS.border,
                           lineWidth: dailyTime == value ? 2 : 1))
-                  }.buttonStyle(.plain).accessibilityAddTraits(
-                    dailyTime == value ? .isSelected : [])
+                  }.buttonStyle(.plain).accessibilityIdentifier("onboarding.time.\(value)")
+                    .accessibilityAddTraits(
+                      dailyTime == value ? .isSelected : [])
                 }
               }.accessibilityLabel("每日学习时间")
+            } else {
+              VStack(spacing: 12) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                  ForEach(choices, id: \.0) { value, label, icon in
+                    CourseChoice(label: label, selected: isSelected(value), icon: icon, tall: true)
+                    {
+                      choose(value)
+                    }.accessibilityIdentifier("onboarding.choice.\(step).\(value)")
+                  }
+                }.accessibilityLabel(titles[step])
+                if step == 3 || step == 4 {
+                  Text("最多选择两项").font(DS.font(14)).foregroundStyle(DS.secondary)
+                }
+              }
             }
-          }
+          }.disabled(saving)
           Spacer(minLength: 32)
           VStack(spacing: 12) {
             if let error {
               Text(error).font(DS.font(14)).foregroundStyle(DS.danger).accessibilityAddTraits(
                 .updatesFrequently)
             }
-            CourseFlowPrimaryButton(title: step == 2 ? "开始专属学习之旅" : "下一页") { next() }.clipShape(
+            CourseFlowPrimaryButton(title: saving ? "正在保存…" : step == lastStep ? "开始专属学习之旅" : "下一页")
+            {
+              next()
+            }.clipShape(
               Capsule()
-            ).accessibilityIdentifier("onboarding.next")
+            ).disabled(saving).accessibilityIdentifier("onboarding.next")
             if step > 0 {
               Button("跳过") {
-                if step == 1 { goal = nil } else { dailyTime = nil }
+                switch step {
+                case 1: goal = nil
+                case 2: dailyTime = nil
+                case 3: learningBarriers = []
+                case 4: guidanceStyles = []
+                case 5: planningSupport = nil
+                default: break
+                }
                 next()
               }.font(DS.font(20)).foregroundStyle(DS.secondary).frame(maxWidth: .infinity)
-                .frame(height: 44).buttonStyle(.plain)
+                .frame(height: 44).buttonStyle(.plain).disabled(saving)
+                .accessibilityIdentifier("onboarding.skip")
             }
           }
         }.frame(maxWidth: 560).frame(
@@ -92,38 +127,98 @@ struct LearnerOnboardingView: View {
         ).padding(.top, store.isPad ? 42 : 4).padding(.bottom, 20).frame(maxWidth: .infinity)
       }.scrollDismissesKeyboard(.interactively)
     }
-    .onAppear {
-      guard !restoredDraft else { return }
-      restoredDraft = true
-      guard !ProcessInfo.processInfo.arguments.contains("--fixture") else {
-        name = "小明同学"
-        goal = "systematic"
-        dailyTime = "30to60"
-        let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "--fixture-step"),
-          arguments.indices.contains(index + 1),
-          let requested = Int(arguments[index + 1])
-        {
-          step = min(2, max(0, requested))
-        }
-        return
-      }
-      let draft = LearnerOnboardingDraft.load()
-      step = draft.step
-      name = draft.name
-      goal = draft.goal
-      dailyTime = draft.dailyTime
-    }
+    .onAppear { restoreDraftIfReady() }
+    .onChange(of: store.isLoading) { _, _ in restoreDraftIfReady() }
+    .onChange(of: store.cloudState.isHydrating) { _, _ in restoreDraftIfReady() }
+    .onChange(of: store.cloudState.cacheKey) { _, _ in restoreDraftIfReady() }
     .onChange(of: step) { _, _ in persistDraft() }
     .onChange(of: name) { _, _ in persistDraft() }
     .onChange(of: goal) { _, _ in persistDraft() }
     .onChange(of: dailyTime) { _, _ in persistDraft() }
+    .onChange(of: learningBarriers) { _, _ in persistDraft() }
+    .onChange(of: guidanceStyles) { _, _ in persistDraft() }
+    .onChange(of: planningSupport) { _, _ in persistDraft() }
   }
-  private func persistDraft() {
-    guard restoredDraft, !completed, !ProcessInfo.processInfo.arguments.contains("--fixture") else {
+  private func restoreDraftIfReady() {
+    guard !store.isLoading, !store.cloudState.isHydrating else { return }
+    if store.cloud != nil {
+      guard store.cloudState.authenticated, store.cloudState.cacheKey != nil else { return }
+    }
+    guard !restoredDraft || restoredScope != store.cloudState.cacheKey else { return }
+    restoredScope = store.cloudState.cacheKey
+    restoredDraft = true
+    guard !ProcessInfo.processInfo.arguments.contains("--fixture") else {
+      name = "小明同学"
+      goal = "systematic"
+      dailyTime = "30to60"
+      let arguments = ProcessInfo.processInfo.arguments
+      if let index = arguments.firstIndex(of: "--fixture-step"),
+        arguments.indices.contains(index + 1),
+        let requested = Int(arguments[index + 1])
+      {
+        step = min(lastStep, max(0, requested))
+        learningBarriers = ["understanding", "memory"]
+        guidanceStyles = ["examples", "stepByStep"]
+        planningSupport = "collaborative"
+      }
       return
     }
-    LearnerOnboardingDraft(step: step, name: name, goal: goal, dailyTime: dailyTime).save()
+    let draft = LearnerOnboardingDraft.load(
+      scope: store.cloudState.cacheKey, preferences: store.preferences)
+    step = draft.step
+    name = draft.name
+    goal = draft.goal
+    dailyTime = draft.dailyTime
+    learningBarriers = draft.learningBarriers
+    guidanceStyles = draft.guidanceStyles
+    planningSupport = draft.planningSupport
+  }
+  private var choices: [(String, String, String)] {
+    switch step {
+    case 3: CourseOptions.barriers
+    case 4: CourseOptions.guidance
+    case 5: CourseOptions.planning
+    default: CourseOptions.goals
+    }
+  }
+  private func isSelected(_ value: String) -> Bool {
+    switch step {
+    case 3: learningBarriers.contains(value)
+    case 4: guidanceStyles.contains(value)
+    case 5: planningSupport == value
+    default: goal == value
+    }
+  }
+  private func choose(_ value: String) {
+    error = nil
+    switch step {
+    case 3: toggle(value, in: &learningBarriers)
+    case 4: toggle(value, in: &guidanceStyles)
+    case 5: planningSupport = value
+    default: goal = value
+    }
+  }
+  private func toggle(_ value: String, in selection: inout [String]) {
+    if let index = selection.firstIndex(of: value) {
+      selection.remove(at: index)
+    } else if selection.count < 2 {
+      selection.append(value)
+    } else {
+      error = "最多选择两项，可先取消一项"
+    }
+  }
+  private func persistDraft() {
+    guard restoredDraft, !completed, !store.isLoading, !store.cloudState.isHydrating,
+      restoredScope == store.cloudState.cacheKey,
+      !ProcessInfo.processInfo.arguments.contains("--fixture")
+    else {
+      return
+    }
+    LearnerOnboardingDraft(
+      step: step, name: name, goal: goal, dailyTime: dailyTime, learningBarriers: learningBarriers,
+      guidanceStyles: guidanceStyles, planningSupport: planningSupport
+    ).save(
+      scope: store.cloudState.cacheKey)
   }
   private func next() {
     if step == 0 && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -133,24 +228,47 @@ struct LearnerOnboardingView: View {
     }
     nameFocused = false
     error = nil
-    if step < 2 {
+    if step < lastStep {
       withAnimation { step += 1 }
     } else {
+      if store.cloud != nil {
+        guard !saving else { return }
+        saving = true
+        Task { @MainActor in
+          defer { saving = false }
+          do {
+            try await store.saveCloudPreferences(
+              name: name.trimmingCharacters(in: .whitespacesAndNewlines), goal: goal,
+              dailyTime: dailyTime, learningBarriers: learningBarriers,
+              guidanceStyles: guidanceStyles, planningSupport: planningSupport)
+            completed = true
+            LearnerOnboardingDraft.clear(scope: store.cloudState.cacheKey)
+            store.replace(.home)
+          } catch { self.error = error.localizedDescription }
+        }
+        return
+      }
       completed = true
       if !ProcessInfo.processInfo.arguments.contains("--fixture") { LearnerOnboardingDraft.clear() }
       store.completeOnboarding(
-        name: name.trimmingCharacters(in: .whitespacesAndNewlines), goal: goal, dailyTime: dailyTime
+        name: name.trimmingCharacters(in: .whitespacesAndNewlines), goal: goal,
+        dailyTime: dailyTime,
+        learningBarriers: learningBarriers, guidanceStyles: guidanceStyles,
+        planningSupport: planningSupport
       )
     }
   }
 }
 
-@ViewBuilder private func flowTop(step: Int, total: Int, back: @escaping () -> Void) -> some View {
+@ViewBuilder private func flowTop(
+  step: Int, total: Int, hideBack: Bool = false, back: @escaping () -> Void
+) -> some View {
   HStack {
     Button(action: back) {
       Image(systemName: "arrow.left").frame(width: 44, height: 44).background(
         DS.surface, in: Circle())
-    }.buttonStyle(.plain).accessibilityLabel("上一步").opacity(step == 0 && total == 3 ? 0 : 1)
+    }.buttonStyle(.plain).accessibilityLabel("上一步").opacity(hideBack ? 0 : 1)
+      .disabled(hideBack).accessibilityHidden(hideBack)
     Spacer()
     HStack(spacing: 3) {
       Text("\(step + 1)").font(DS.font(20, weight: .bold))
@@ -227,7 +345,8 @@ struct CourseSetupView: View {
         ).padding(.top, store.isPad ? 42 : 4).padding(.bottom, 20).frame(maxWidth: .infinity)
       }.scrollDismissesKeyboard(.interactively)
     }.fileImporter(
-      isPresented: $selectingFile, allowedContentTypes: CourseUploadView.allowedTypes,
+      isPresented: $selectingFile,
+      allowedContentTypes: store.cloud == nil ? CourseUploadView.allowedTypes : [.pdf],
       allowsMultipleSelection: true
     ) { result in
       Task { @MainActor in
@@ -312,6 +431,20 @@ struct CourseSetupView: View {
     }
     saving = true
     if store.draft.editingCourseID != nil {
+      if store.cloud != nil {
+        Task { @MainActor in
+          defer { saving = false }
+          do {
+            try await store.saveCloudCourse(
+              name: store.draft.name, resourceIDs: store.draft.resourceIDs,
+              diagnosis: store.draft.diagnosis)
+            store.draft = CourseDraft()
+            store.persist()
+            store.replace(.courseDetail)
+          } catch { self.error = error.localizedDescription }
+        }
+        return
+      }
       store.createCourse(
         name: store.draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
         resourceIDs: store.draft.resourceIDs, diagnosis: store.draft.diagnosis)
@@ -319,6 +452,16 @@ struct CourseSetupView: View {
     } else if let catalogID = store.draft.catalogBookID,
       let book = store.community.first(where: { $0.id == catalogID })
     {
+      if store.cloud != nil {
+        Task { @MainActor in
+          defer { saving = false }
+          do {
+            try await store.importCloudCommunity(book)
+            store.replace(.communityImport)
+          } catch { self.error = error.localizedDescription }
+        }
+        return
+      }
       store.importCommunity(book)
       store.replace(.communityImport)
     } else {
@@ -359,7 +502,8 @@ struct CourseUploadView: View {
           DS.surface,
           in: UnevenRoundedRectangle(
             topLeadingRadius: addingToCurrentCourse ? 0 : 54,
-            topTrailingRadius: addingToCurrentCourse ? 0 : 54))
+            topTrailingRadius: addingToCurrentCourse ? 0 : 54)
+        )
         .accessibilityElement(children: .contain).accessibilityIdentifier("upload.panel")
         .offset(y: addingToCurrentCourse || panelPresented ? 0 : geometry.size.height + 80)
         .padding(.top, addingToCurrentCourse ? 0 : 16)
@@ -375,7 +519,8 @@ struct CourseUploadView: View {
       }
     }
     .fileImporter(
-      isPresented: $pickerOpen, allowedContentTypes: Self.allowedTypes,
+      isPresented: $pickerOpen,
+      allowedContentTypes: store.cloud == nil ? Self.allowedTypes : [.pdf],
       allowsMultipleSelection: true
     ) { result in
       switch result {
@@ -409,9 +554,11 @@ struct CourseUploadView: View {
       let top: CGFloat = compact ? 20 : 48
       let bottom: CGFloat = compact ? 20 : 40
       let gap: CGFloat = compact ? 16 : 24
-      let controlCount = 2 + (files.isEmpty ? 0 : 1) + (failure == nil ? 0 : 1)
+      let controlCount =
+        2 + (files.isEmpty ? 0 : 1) + (failure == nil ? 0 : 1)
         + (canContinueSetup ? 1 : 0)
-      let controlHeight: CGFloat = 24 + 54 + (files.isEmpty ? 0 : 44)
+      let controlHeight: CGFloat =
+        24 + 54 + (files.isEmpty ? 0 : 44)
         + (failure == nil ? 0 : compact ? 20 : 42) + (canContinueSetup ? 54 : 0)
         + CGFloat(controlCount - 1) * (compact ? 8 : 16)
       let tileSize = min(210, max(80, size.height - top - bottom - gap - controlHeight))
@@ -432,7 +579,9 @@ struct CourseUploadView: View {
               HStack(spacing: 4) {
                 Text(url.lastPathComponent).font(DS.font(14)).lineLimit(1)
                   .frame(maxWidth: 220)
-                Button { files.remove(at: index) } label: {
+                Button {
+                  files.remove(at: index)
+                } label: {
                   Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
                     .frame(width: 44, height: 44)
                 }.buttonStyle(.plain).disabled(busy)
@@ -803,14 +952,16 @@ struct CourseChapterConfirmationView: View {
 
     }.safeAreaInset(edge: .bottom, spacing: 0) {
       VStack(spacing: 6) {
-        BCButton("确认生成课程") {
+        BCButton(store.cloudState.isWorking ? "正在准备课程…" : "确认生成课程") {
           guard !store.chapters.isEmpty else {
             error = "请至少保留一个章节"
             return
           }
           store.confirmChapters()
-        }.frame(maxWidth: store.isPad ? 460 : .infinity).disabled(store.chapters.isEmpty)
-          .accessibilityIdentifier("chapters.confirm")
+        }.frame(maxWidth: store.isPad ? 460 : .infinity).disabled(
+          store.chapters.isEmpty || store.cloudState.isWorking
+        )
+        .accessibilityIdentifier("chapters.confirm")
       }.padding(12).frame(maxWidth: .infinity).background(
         DS.surface.opacity(0.94), in: RoundedRectangle(cornerRadius: store.isPad ? 20 : 0)
       ).overlay(
@@ -830,6 +981,10 @@ struct CourseCompletionView: View {
   @Environment(\.bookCourseReduceMotion) private var reduceMotion
   @State private var phase = 0
   private var completionAnnouncement: String {
+    if store.cloud != nil, !community {
+      return
+        "生成成功。已准备好 \(store.lessons.filter { $0.status == "ready" }.count) 节 AI 课时，其他章节可以在学习时继续生成。"
+    }
     if community, let book = store.community.first(where: { $0.id == store.selectedCommunityID }) {
       return
         "导入成功。《\(book.title)》已加入你的课程，可在课程中继续添加教材和文件。\(book.chapters.count) 个目录项，\(book.flashcardCount) 张概念闪卡。"

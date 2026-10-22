@@ -60,17 +60,47 @@ final class CourseFunctionalUITests: XCTestCase {
     }
   }
 
-  func testOnboardingCompletesAllThreeSteps() {
+  func testOnboardingCompletesSixStepsWithSelectionLimitAndBackNavigation() {
     let app = launch("onboarding")
-    replace(app.textFields["输入你的姓名或昵称"], with: "Course Flow Learner")
     tap(app.buttons["onboarding.next"], in: app)
     tap(
-      app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "备考冲刺")).firstMatch, in: app)
+      app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "备考提升成绩")).firstMatch, in: app
+    )
     tap(app.buttons["onboarding.next"], in: app)
     tap(app.buttons["30分钟以内"], in: app)
     tap(app.buttons["onboarding.next"], in: app)
+    tap(app.buttons["onboarding.choice.3.understanding"], in: app)
+    tap(app.buttons["onboarding.choice.3.memory"], in: app)
+    tap(app.buttons["onboarding.choice.3.focus"], in: app)
+    XCTAssertTrue(app.staticTexts["最多选择两项，可先取消一项"].exists)
+    XCTAssertFalse(app.buttons["onboarding.choice.3.focus"].isSelected)
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.time.under30"].isSelected)
+    tap(app.buttons["onboarding.next"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.3.understanding"].isSelected)
+    XCTAssertTrue(app.buttons["onboarding.choice.3.memory"].isSelected)
+    tap(app.buttons["onboarding.next"], in: app)
+    tap(app.buttons["onboarding.choice.4.examples"], in: app)
+    tap(app.buttons["onboarding.choice.4.stepByStep"], in: app)
+    tap(app.buttons["onboarding.next"], in: app)
+    tap(app.buttons["onboarding.choice.5.collaborative"], in: app)
+    tap(app.buttons["上一步"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.4.examples"].isSelected)
+    tap(app.buttons["onboarding.next"], in: app)
+    XCTAssertTrue(app.buttons["onboarding.choice.5.collaborative"].isSelected)
+    tap(app.buttons["onboarding.next"], in: app)
     XCTAssertTrue(
-      app.staticTexts["Hi，Course Flow Learner"].firstMatch.waitForExistence(timeout: 10))
+      app.staticTexts["Hi，小明同学"].firstMatch.waitForExistence(timeout: 10))
+  }
+
+  func testOnboardingCanSkipEveryOptionalQuestion() {
+    let app = launch("onboarding")
+    tap(app.buttons["onboarding.next"], in: app)
+    for _ in 1...5 { tap(app.buttons["onboarding.skip"], in: app) }
+    XCTAssertTrue(app.staticTexts["Hi，小明同学"].firstMatch.waitForExistence(timeout: 10))
+    tap(app.buttons["tab-profile"], in: app)
+    tap(app.buttons["profile.settings"], in: app)
+    XCTAssertTrue(app.staticTexts["暂未设置"].firstMatch.waitForExistence(timeout: 10))
   }
 
   func testQuestionnaireChapterCancelSaveRemoveCancelAndConfirm() {
