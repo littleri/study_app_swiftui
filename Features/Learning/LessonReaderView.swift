@@ -373,6 +373,7 @@ struct LessonReaderView: View {
   private func readerHeader(_ lesson: Lesson) -> some View {
     ZStack(alignment: .top) {
       Text("章节学习").font(DS.font(27.2, weight: .bold))
+        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("navigation.title")
       HStack {
         Button {
           store.back()
@@ -383,10 +384,12 @@ struct LessonReaderView: View {
             )
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
         }.buttonStyle(.plain).accessibilityLabel("返回")
+          .accessibilityIdentifier("navigation.back")
         Spacer()
-      }
-    }.frame(height: 44, alignment: .top).padding(.horizontal, store.isPad ? 32 : 16)
-      .padding(.top, NotesScreenMetrics.titleTopInset).padding(.bottom, store.isPad ? 14.84 : 6)
+      }.offset(y: DS.navigationButtonOffset)
+    }.frame(height: DS.navigationRowHeight, alignment: .top).padding(.horizontal, store.isPad ? 32 : 16)
+      .padding(.top, NotesScreenMetrics.titleTopInset)
+      .padding(.bottom, store.isPad ? 14.84 : 6)
       .foregroundStyle(DS.text)
       .navigationBarSurface(DS.surface)
   }

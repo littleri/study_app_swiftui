@@ -74,15 +74,22 @@ struct AppRootView: View {
         }
       }
       .overlay {
-        if let sheet = store.sheet {
-          AppOverlay(sheet: sheet).transition(
-            reduceMotion ? .identity : .opacity.combined(with: .scale(scale: 0.97)))
+        BottomPanelLayer(presentationID: store.sheet?.rawValue, onDismiss: { store.closeSheet() }) {
+          if let sheet = store.sheet {
+            AppOverlay(sheet: sheet).id(sheet.rawValue)
+              .transition(reduceMotion ? .identity : .move(edge: .bottom))
+          }
         }
       }
       .overlay {
-        if store.globalAssistantOpen {
-          GlobalAssistantOverlay().transition(
-            reduceMotion ? .identity : .opacity.combined(with: .scale(scale: 0.97)))
+        BottomPanelLayer(
+          presentationID: store.globalAssistantOpen ? "guide" : nil, dimOpacity: 0.40,
+          onDismiss: { store.globalAssistantOpen = false }
+        ) {
+          if store.globalAssistantOpen {
+            GlobalAssistantOverlay()
+              .transition(reduceMotion ? .identity : .move(edge: .bottom))
+          }
         }
       }
       .overlay(alignment: .top) {
@@ -99,6 +106,7 @@ struct AppRootView: View {
       .overlay {
         if store.isLoading {
           Image("Splash").resizable().scaledToFit().frame(width: 144, height: 144)
+            .clipShape(RoundedRectangle(cornerRadius: 32, style: .circular))
             .accessibilityHidden(true)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(hex: 0xfefdfa).ignoresSafeArea())
@@ -123,7 +131,6 @@ struct AppRootView: View {
         FixtureOrientation.apply()
       }
       .onChange(of: pad) { _, value in store.isPad = value }
-      .animation(reduceMotion ? nil : DS.localAnimation, value: store.sheet)
     }
     .background(pageBackground.ignoresSafeArea()).font(DS.font()).foregroundStyle(DS.text).tint(
       DS.primary
@@ -153,7 +160,7 @@ struct AppRootView: View {
             ? nil : { store.back() },
           titleColor: route == .upload ? .white : DS.text
         ).padding(.top, pad ? topInset : 0).padding(.horizontal, pad ? 16 : 0)
-          .navigationBarSurface(pageBackground)
+          .navigationBarSurface(pageBackground, fadesIntoContent: route != .upload)
       }
       screen(route: route).frame(maxWidth: .infinity, maxHeight: .infinity)
     }.background(pageBackground)
@@ -464,8 +471,6 @@ struct AppOverlay: View {
       let visibleHeight = max(
         120, min(geometry.size.height, keyboardTop - geometry.frame(in: .global).minY))
       ZStack(alignment: store.isPad ? (sheet == .chat ? .topTrailing : .center) : .bottom) {
-        Color(hex: 0x20263a).opacity(0.46).ignoresSafeArea().onTapGesture { store.closeSheet() }
-          .accessibilityLabel("关闭弹层")
         VStack(spacing: 0) {
           if !store.isPad {
             Capsule().fill(Color(hex: 0xd2d0d8)).frame(width: 42, height: 5).padding(.top, 14)
@@ -498,7 +503,9 @@ struct AppOverlay: View {
           height: store.isPad && sheet == .chat
             ? max(120, visibleHeight - 33) : min(height, visibleHeight - 16)
         )
-        .background(.white, in: RoundedRectangle(cornerRadius: 28)).compositingGroup().shadow(
+        .background(.white, in: RoundedRectangle(cornerRadius: 28))
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .compositingGroup().shadow(
           color: DS.text.opacity(0.22), radius: 30, y: 16
         )
         .padding(.trailing, store.isPad && sheet == .chat ? 32 : 0).padding(
@@ -507,7 +514,10 @@ struct AppOverlay: View {
         .offset(
           x: store.isPad && sheet != .chat && store.route.showsPrimaryNavigation ? 34.17 : 0,
           y: store.isPad && sheet != .chat ? -4 : 0)
-      }.frame(width: geometry.size.width, height: visibleHeight).accessibilityAddTraits(.isModal)
+      }.frame(
+        width: geometry.size.width, height: visibleHeight,
+        alignment: store.isPad ? (sheet == .chat ? .topTrailing : .center) : .bottom
+      ).accessibilityAddTraits(.isModal)
     }.ignoresSafeArea(.container, edges: .bottom)
       .onReceive(
         NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)

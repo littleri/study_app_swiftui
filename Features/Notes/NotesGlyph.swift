@@ -113,17 +113,18 @@ struct NotesPageHeader: View {
   var body: some View {
     ZStack(alignment: .top) {
       Text(title).font(DS.font(27.2, weight: .bold)).foregroundStyle(DS.text).frame(
-        height: 44, alignment: .top)
+        height: DS.navigationRowHeight, alignment: .top)
+        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("navigation.title")
       HStack {
         Button(action: back) {
           Image(systemName: "arrow.left").font(.system(size: 18)).foregroundStyle(DS.text).frame(
             width: 44, height: 44
           ).background(.white, in: RoundedRectangle(cornerRadius: 12)).overlay(
             RoundedRectangle(cornerRadius: 12).stroke(DS.border))
-        }.accessibilityLabel("返回")
+        }.accessibilityLabel("返回").accessibilityIdentifier("navigation.back")
         Spacer()
-      }
-    }.frame(height: 44).padding(.horizontal, store.isPad ? 32 : 16).padding(
+      }.offset(y: DS.navigationButtonOffset)
+    }.frame(height: DS.navigationRowHeight).padding(.horizontal, store.isPad ? 32 : 16).padding(
       .top, NotesScreenMetrics.titleTopInset)
       .navigationBarSurface()
   }

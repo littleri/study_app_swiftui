@@ -33,7 +33,6 @@ struct GlobalAssistantOverlay: View {
         180, min(geometry.size.height, keyboardTop - geometry.frame(in: .global).minY))
       let width = store.isPad ? min(420, geometry.size.width - 64) : geometry.size.width
       ZStack(alignment: store.isPad ? .topTrailing : .bottom) {
-        Color(hex: 0x20263a).opacity(0.40).ignoresSafeArea().onTapGesture { close() }
         VStack(spacing: 12) {
           HStack(spacing: 8) {
             AssetImage("/assets/brand/ai-assistant/avatar-v1.png").frame(width: 42, height: 34)
@@ -198,11 +197,16 @@ struct GlobalAssistantOverlay: View {
           width: width,
           height: store.isPad ? max(120, visibleHeight - 33) : max(120, visibleHeight - 44)
         )
-        .background(.white, in: RoundedRectangle(cornerRadius: 28)).compositingGroup().shadow(
+        .background(.white, in: RoundedRectangle(cornerRadius: 28))
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .compositingGroup().shadow(
           color: DS.text.opacity(0.16), radius: 24, y: 8
         )
         .padding(.trailing, store.isPad ? 32 : 0).padding(.top, store.isPad ? 13 : 0)
-      }.frame(width: geometry.size.width, height: visibleHeight).accessibilityAddTraits(.isModal)
+      }.frame(
+        width: geometry.size.width, height: visibleHeight,
+        alignment: store.isPad ? .topTrailing : .bottom
+      ).accessibilityAddTraits(.isModal)
     }.ignoresSafeArea(.container, edges: .bottom)
       .onReceive(
         NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)

@@ -29,6 +29,297 @@ final class BookCourseUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["PROFILE"].firstMatch.waitForExistence(timeout: 8))
   }
 
+  func testProfileHeaderCentersOnScrollAndRestoresSettingsAtTop() throws {
+    XCUIDevice.shared.orientation = .portrait
+    let app = launch("profile")
+    let title = app.staticTexts["profile.title"]
+    let settings = app.buttons["profile.settings"]
+    let scroll = app.scrollViews.firstMatch
+    XCTAssertTrue(title.waitForExistence(timeout: 20))
+    XCTAssertTrue(settings.isHittable)
+    let lastAction = app.buttons["查看今日计划"].firstMatch
+    if lastAction.isHittable && lastAction.frame.maxY < scroll.frame.maxY - 20 {
+      // On tall layouts the default cards can fit without scrolling. Expand
+      // preferences to exercise a real scroll rather than a transient bounce.
+      app.buttons["编辑学习偏好"].tap()
+      XCTAssertTrue(app.staticTexts["每日学习时间"].waitForExistence(timeout: 10))
+    }
+    let initialY = title.frame.minY
+    let contentCenter = scroll.frame.midX
+    XCTAssertLessThan(title.frame.midX, contentCenter - 50)
+    XCTAssertGreaterThan(settings.frame.midX, contentCenter + 50)
+    keepScreenshot("profile-header-at-top", app: app)
+
+    scroll.swipeUp(velocity: .slow)
+    let compact = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        title.isHittable && !settings.exists
+          && abs(title.frame.midX - contentCenter) < 2
+          && abs(title.frame.minY - initialY) < 2
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [compact], timeout: 10), .completed)
+    keepScreenshot("profile-header-scrolled", app: app)
+
+    for _ in 0..<5 {
+      if settings.exists && settings.isHittable { break }
+      scroll.swipeDown(velocity: .fast)
+    }
+    let expanded = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        settings.isHittable && title.frame.midX < contentCenter - 50
+          && abs(title.frame.minY - initialY) < 2
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 10), .completed)
+    keepScreenshot("profile-header-restored", app: app)
+    settings.tap()
+    XCTAssertTrue(app.staticTexts["设置"].firstMatch.waitForExistence(timeout: 10))
+    app.buttons["返回"].firstMatch.tap()
+    XCTAssertTrue(settings.waitForExistence(timeout: 10))
+    XCTAssertTrue(settings.isHittable)
+  }
+
+  func testStudySheetsPreserveStatusBarAndUnderlyingScrollPosition() throws {
+    XCUIDevice.shared.orientation = .portrait
+    let app = launch("study")
+    let addMaterials = app.buttons["添加资料"].firstMatch
+    let switchCourse = app.buttons["study.course.switch"]
+    XCTAssertTrue(addMaterials.waitForExistence(timeout: 20))
+    let original = switchCourse.frame
+
+    func assertStatusBar(dimmed: Bool) throws {
+      let image = try XCTUnwrap(XCUIScreen.main.screenshot().image.cgImage)
+      let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+      let context = try XCTUnwrap(CGContext(
+        data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      let expected = dimmed ? [148, 151, 162] : [246, 248, 251]
+      for fraction in [0.30, 0.70] {
+        for y: CGFloat in [4, 16] {
+          let pixel = try XCTUnwrap(image.cropping(to: CGRect(
+            x: CGFloat(image.width) * fraction, y: y * scale, width: 1, height: 1)))
+          context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+          let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+          for channel in 0..<3 {
+            XCTAssertEqual(Int(bytes[channel]), expected[channel], accuracy: 3)
+          }
+        }
+      }
+    }
+
+    try assertStatusBar(dimmed: false)
+    for index in 0..<2 {
+      addMaterials.tap()
+      XCTAssertTrue(app.buttons["upload.select"].waitForExistence(timeout: 10))
+      XCTAssertTrue(app.buttons["upload.select"].isHittable)
+      let close = app.buttons["overlay-close"]
+      XCTAssertTrue(close.isHittable)
+      XCTAssertGreaterThan(app.buttons["upload.select"].frame.minY, close.frame.maxY)
+      try assertStatusBar(dimmed: true)
+      keepScreenshot("study-add-materials-\(index)", app: app)
+      app.buttons["overlay-close"].tap()
+      XCTAssertTrue(app.buttons["overlay-close"].waitForNonExistence(timeout: 10))
+      try assertStatusBar(dimmed: false)
+      XCTAssertEqual(switchCourse.frame.minY, original.minY, accuracy: 1)
+      XCTAssertTrue(addMaterials.isHittable)
+    }
+    switchCourse.tap()
+    XCTAssertTrue(app.buttons["创建新课程"].waitForExistence(timeout: 10))
+    try assertStatusBar(dimmed: true)
+    keepScreenshot("study-switch-course-sheet", app: app)
+    // Outside taps continue to dismiss the panel after the backdrop is separated.
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)).tap()
+    XCTAssertTrue(app.buttons["overlay-close"].waitForNonExistence(timeout: 10))
+    try assertStatusBar(dimmed: false)
+    XCTAssertEqual(switchCourse.frame.minY, original.minY, accuracy: 1)
+  }
+
+  func testHomeShelfCentersCurrentCourseAndFollowsStudySelection() throws {
+    XCUIDevice.shared.orientation = .portrait
+    defer { XCUIDevice.shared.orientation = .portrait }
+    let app = launch("home")
+    let biology = "course:book_biology_2"
+    let math = "course:catalog_high_school_math_required_2"
+    let shelf = app.scrollViews["home.course.shelf"]
+
+    func assertCentered(_ id: String) {
+      let cover = app.buttons["home.course." + id]
+      XCTAssertTrue(cover.waitForExistence(timeout: 10))
+      let centered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        let frame = cover.frame
+        let viewport = shelf.frame
+        return cover.isSelected && abs(frame.midX - viewport.midX) < 2
+          && frame.minX >= viewport.minX && frame.maxX <= viewport.maxX
+      }, object: nil)
+      XCTAssertEqual(XCTWaiter.wait(for: [centered], timeout: 10), .completed,
+        "\(id): selected=\(cover.isSelected), cover=\(cover.frame), shelf=\(shelf.frame)")
+      XCTAssertTrue(cover.isHittable)
+    }
+
+    assertCentered(biology)
+    keepScreenshot("home-shelf-restored-biology", app: app)
+    // A swipe must settle on one book, including the first item in the shelf.
+    shelf.swipeRight()
+    assertCentered(math)
+    app.buttons["home.course." + math].tap()
+    XCTAssertTrue(app.buttons["study.course.switch"].waitForExistence(timeout: 10))
+    app.buttons["study.course.switch"].tap()
+    let biologyChoice = app.buttons["study.course." + biology]
+    XCTAssertTrue(biologyChoice.waitForExistence(timeout: 10))
+    biologyChoice.tap()
+    app.buttons["tab-home"].tap()
+    assertCentered(biology)
+    keepScreenshot("home-shelf-return-from-study", app: app)
+
+    // Native tabs retain the Home view. Later changes still need to move its viewport.
+    app.buttons["tab-study"].tap()
+    app.buttons["study.course.switch"].tap()
+    let mathChoice = app.buttons["study.course." + math]
+    XCTAssertTrue(mathChoice.waitForExistence(timeout: 10))
+    mathChoice.tap()
+    app.buttons["tab-home"].tap()
+    assertCentered(math)
+    keepScreenshot("home-shelf-restored-math", app: app)
+  }
+
+  func testSharedBottomPanelsKeepContentAndCloseReachable() throws {
+    XCUIDevice.shared.orientation = .portrait
+    for sheet in ["noteType", "note", "editChapter", "chat"] {
+      let app = launch("study", sheet: sheet)
+      let close = app.buttons["overlay-close"]
+      XCTAssertTrue(close.waitForExistence(timeout: 20), sheet)
+      XCTAssertTrue(close.isHittable, sheet)
+      XCTAssertTrue(app.windows.firstMatch.frame.contains(close.frame), sheet)
+      if sheet == "noteType" {
+        XCTAssertTrue(app.buttons.matching(
+          NSPredicate(format: "label CONTAINS %@", "文字笔记")).firstMatch.isHittable)
+      } else if sheet == "editChapter" {
+        XCTAssertTrue(app.textFields["课程章节名称"].isHittable)
+      } else if sheet == "chat" {
+        XCTAssertTrue(app.textFields["assistant-input"].isHittable)
+      }
+      keepScreenshot("bottom-panel-" + sheet, app: app)
+      close.tap()
+      XCTAssertTrue(close.waitForNonExistence(timeout: 10), sheet)
+      XCTAssertTrue(app.buttons["添加资料"].firstMatch.isHittable, sheet)
+      app.terminate()
+    }
+  }
+
+  func testUploadPanelStaysFixedAndCoversBottomSafeArea() throws {
+    XCUIDevice.shared.orientation = .portrait
+    defer { XCUIDevice.shared.orientation = .portrait }
+    let app = launch("home")
+    let create = app.buttons["创建课程"].firstMatch
+    XCTAssertTrue(create.waitForExistence(timeout: 20))
+    create.tap()
+    let select = app.buttons["upload.select"]
+    let save = app.buttons["upload.save"]
+    let panel = app.otherElements["upload.panel"].firstMatch
+    XCTAssertTrue(select.waitForExistence(timeout: 10))
+    XCTAssertTrue(panel.waitForExistence(timeout: 10))
+    XCTAssertTrue(select.isHittable)
+    XCTAssertTrue(save.exists)
+    XCTAssertFalse(save.isEnabled)
+    XCTAssertFalse(app.scrollViews.firstMatch.exists)
+    XCTAssertEqual(panel.frame.maxY, app.windows.firstMatch.frame.maxY, accuracy: 1)
+    let original = select.frame
+    app.swipeUp()
+    app.swipeDown()
+    XCTAssertEqual(select.frame.minY, original.minY, accuracy: 1)
+    keepScreenshot("upload-fixed-portrait", app: app)
+
+    // Verify actual rendered colors, including the area below the home indicator.
+    let screenshot = XCUIScreen.main.screenshot()
+    let image = try XCTUnwrap(screenshot.image.cgImage)
+    let window = app.windows.firstMatch.frame
+    let scale = CGFloat(image.width) / window.width
+    let context = try XCTUnwrap(CGContext(
+      data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    for (point, expected) in [
+      (CGPoint(x: window.midX, y: panel.frame.minY - 4), [220, 202, 250]),
+      (CGPoint(x: window.width * 0.4, y: window.maxY - 3), [255, 255, 255]),
+      (CGPoint(x: window.width * 0.6, y: window.maxY - 3), [255, 255, 255]),
+    ] {
+      let pixel = try XCTUnwrap(image.cropping(to: CGRect(
+        x: point.x * scale, y: point.y * scale, width: 1, height: 1)))
+      context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+      let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+      for channel in 0..<3 { XCTAssertEqual(Int(bytes[channel]), expected[channel], accuracy: 3) }
+    }
+
+    select.tap()
+    let cancel = app.buttons.matching(
+      NSPredicate(format: "label IN %@", ["取消", "Cancel"])).firstMatch
+    XCTAssertTrue(cancel.waitForExistence(timeout: 15))
+    cancel.tap()
+    XCTAssertTrue(select.waitForExistence(timeout: 10))
+    XCTAssertTrue(select.isHittable)
+    XCTAssertFalse(app.staticTexts["upload.error"].exists)
+    XCTAssertEqual(select.frame.minY, original.minY, accuracy: 1)
+
+    XCUIDevice.shared.orientation = .landscapeLeft
+    let landscape = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        let bounds = app.windows.firstMatch.frame
+        return bounds.width > bounds.height && select.isHittable
+          && bounds.contains(select.frame) && bounds.contains(save.frame)
+          && abs(panel.frame.maxY - bounds.maxY) < 1
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 15), .completed)
+    XCTAssertTrue(select.isHittable)
+    XCTAssertTrue(save.exists)
+    XCTAssertFalse(app.scrollViews.firstMatch.exists)
+    XCTAssertEqual(panel.frame.maxY, app.windows.firstMatch.frame.maxY, accuracy: 1)
+    let landscapeShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    landscapeShot.name = "upload-fixed-landscape"
+    landscapeShot.lifetime = .keepAlways
+    add(landscapeShot)
+  }
+
+  func testDiscoveryPullRefreshPreservesFiltersAndSearch() throws {
+    XCUIDevice.shared.orientation = .portrait
+    let app = launch("community")
+    let search = app.textFields["community.search"]
+    let scroll = app.scrollViews["community.scroll"]
+    XCTAssertTrue(search.waitForExistence(timeout: 20))
+    let searchY = search.frame.minY
+    XCTAssertFalse(app.staticTexts.matching(
+      NSPredicate(format: "label BEGINSWITH %@", "为你推荐")).firstMatch.exists)
+
+    func pull(_ fraction: CGFloat) {
+      let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+      let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: fraction))
+      start.press(forDuration: 0.08, thenDragTo: end, withVelocity: .slow,
+        thenHoldForDuration: 0.25)
+    }
+
+    // A short, cancelled pull must not reload the catalog.
+    pull(0.20)
+    XCTAssertEqual(scroll.value as? String, "下拉刷新课程")
+    let math = app.buttons["数学"].firstMatch
+    math.tap()
+    pull(0.82)
+    let refreshed = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value == %@", "课程已更新"), object: scroll)
+    XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 10), .completed)
+    XCTAssertTrue(math.isSelected)
+    XCTAssertEqual(search.frame.minY, searchY, accuracy: 1)
+    keepScreenshot("discovery-refreshed-category", app: app)
+
+    search.tap()
+    search.typeText("不存在的课程xyz\n")
+    XCTAssertTrue(app.staticTexts["没有找到相关课程"].waitForExistence(timeout: 5))
+    pull(0.82)
+    XCTAssertEqual(search.value as? String, "不存在的课程xyz")
+    XCTAssertEqual(scroll.value as? String, "课程已更新")
+    XCTAssertTrue(app.staticTexts["没有找到相关课程"].exists)
+    app.buttons["清除搜索"].tap()
+    XCTAssertTrue(app.buttons.matching(
+      NSPredicate(format: "label CONTAINS %@", "查看课程")).firstMatch.isHittable)
+    keepScreenshot("discovery-refresh-restored", app: app)
+  }
+
   func testDiscoveryStatusBarBackgroundAfterScrolling() throws {
     XCUIDevice.shared.orientation = .portrait
     let app = launch("community")

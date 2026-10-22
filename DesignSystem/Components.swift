@@ -15,6 +15,9 @@ enum DS {
     secondary = Color(hex: 0x4f5e75), muted = Color(hex: 0x596780), border = Color(hex: 0xd7dee8)
   static let warning = Color(hex: 0x985014), danger = Color(hex: 0xb4233c),
     mint = Color(hex: 0x1e765d), orange = Color(hex: 0x985014)
+  static let navigationRowHeight: CGFloat = 44
+  // Align controls with the visible cap height of the Noto SC navigation title.
+  static let navigationButtonOffset: CGFloat = -4
   static func font(_ size: CGFloat = 20, weight: Font.Weight = .regular) -> Font {
     .custom(
       weight == .regular || weight == .light
@@ -22,6 +25,7 @@ enum DS {
   }
   static let globalAnimation = Animation.timingCurve(0.25, 1, 0.5, 1, duration: 0.35)
   static let localAnimation = Animation.timingCurve(0.65, 0, 0.35, 1, duration: 0.18)
+  static let panelAnimation = Animation.spring(response: 0.48, dampingFraction: 0.90)
   static let flipAnimation = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.34)
   static func tone(_ name: String) -> Color {
     switch name {
@@ -149,6 +153,7 @@ struct BCHeader: View {
     ZStack(alignment: .top) {
       VStack(spacing: 2) {
         Text(title).font(DS.font(27.2, weight: .bold)).foregroundStyle(titleColor).lineLimit(1)
+          .accessibilityAddTraits(.isHeader).accessibilityIdentifier("navigation.title")
         if let subtitle {
           Text(subtitle).font(DS.font(14)).foregroundStyle(DS.secondary).lineLimit(1)
         }
@@ -159,7 +164,7 @@ struct BCHeader: View {
             BCGlyph("ArrowLeft").frame(width: 18, height: 18).frame(width: 44, height: 44)
               .background(.white, in: RoundedRectangle(cornerRadius: 12)).overlay(
                 RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
-          }.accessibilityLabel("返回")
+          }.accessibilityLabel("返回").accessibilityIdentifier("navigation.back")
         }
         Spacer(minLength: 0)
         if let actionTitle, let action {
@@ -168,8 +173,9 @@ struct BCHeader: View {
               .frame(minHeight: 44)
           }
         }
-      }
-    }.foregroundStyle(DS.text).frame(height: 44).padding(.horizontal, 16).padding(.top, 4)
+      }.offset(y: DS.navigationButtonOffset)
+    }.foregroundStyle(DS.text).frame(height: DS.navigationRowHeight)
+      .padding(.horizontal, 16).padding(.top, 4)
   }
 }
 private final class AssetCache { static let images = NSCache<NSString, UIImage>() }
@@ -300,8 +306,34 @@ struct ProgressiveMaterial: View {
   }
 }
 
+/// Keep the full-screen dimmer stationary while the panel travels above it.
+/// Scaling or moving a combined panel/dimmer also moves the status-bar coverage.
+struct BottomPanelLayer<Content: View>: View {
+  let presentationID: String?
+  var dimOpacity: Double = 0.46
+  let onDismiss: () -> Void
+  @ViewBuilder var content: () -> Content
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+
+  var body: some View {
+    ZStack {
+      Color(hex: 0x20263a).opacity(presentationID == nil ? 0 : dimOpacity)
+        .ignoresSafeArea()
+        .contentShape(Rectangle()).onTapGesture(perform: onDismiss)
+        .accessibilityLabel("关闭弹层").accessibilityIdentifier("modal.backdrop")
+        .accessibilityHidden(presentationID == nil)
+        .animation(
+          reduceMotion ? nil : .easeInOut(duration: 0.20), value: presentationID != nil)
+      content()
+    }
+    .allowsHitTesting(presentationID != nil)
+    .animation(reduceMotion ? nil : DS.panelAnimation, value: presentationID)
+  }
+}
+
 private struct NavigationBarSurface: ViewModifier {
   let color: Color
+  let fadesIntoContent: Bool
 
   func body(content: Content) -> some View {
     content
@@ -309,15 +341,19 @@ private struct NavigationBarSurface: ViewModifier {
       .overlay(alignment: .bottom) {
         // Extend the transition into the scroll content without taking space
         // from the layout or intercepting controls beneath the header.
-        ProgressiveMaterial(top: true).frame(height: 24).offset(y: 24)
+        if fadesIntoContent {
+          ProgressiveMaterial(top: true).frame(height: 24).offset(y: 24)
+        }
       }
       .zIndex(1)
   }
 }
 
 extension View {
-  func navigationBarSurface(_ color: Color = DS.background) -> some View {
-    modifier(NavigationBarSurface(color: color))
+  func navigationBarSurface(_ color: Color = DS.background, fadesIntoContent: Bool = true)
+    -> some View
+  {
+    modifier(NavigationBarSurface(color: color, fadesIntoContent: fadesIntoContent))
   }
 }
 

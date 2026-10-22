@@ -331,6 +331,8 @@ struct CourseSetupView: View {
 struct CourseUploadView: View {
   var addingToCurrentCourse = false
   @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var panelPresented = false
   @State private var files: [URL] = []
   @State private var pickerOpen = false
   @State private var busy = false
@@ -343,41 +345,34 @@ struct CourseUploadView: View {
   }
   var body: some View {
     GeometryReader { geometry in
-      ScrollView {
-        VStack(spacing: 24) {
-          fileTiles
-          if !files.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-              ForEach(Array(files.enumerated()), id: \.offset) { index, url in
-                Text("\(index + 1). \(url.lastPathComponent)").font(DS.font(14)).frame(
-                  maxWidth: .infinity, alignment: .leading)
-              }
-            }
-          }
-          Text("添加课程资料").font(DS.font(16, weight: .bold))
-          if let error = error ?? store.importError {
-            Text(error).font(DS.font(14)).foregroundStyle(DS.danger).accessibilityIdentifier(
-              "upload.error")
-          }
-          BCButton(busy ? "正在整理…" : "保存资料并继续") { saveFiles() }.disabled(files.isEmpty || busy)
-            .accessibilityIdentifier("upload.save")
-          if !addingToCurrentCourse && !store.draft.resourceIDs.isEmpty {
-            BCButton("继续设置课程", style: .secondary) {
-              store.go(store.draft.parseCompleted ? .courseSetup : .parseReady)
-            }
-          }
+      ZStack(alignment: .top) {
+        if addingToCurrentCourse {
+          DS.surface
+        } else {
+          Color(hex: 0xDCCAFA).ignoresSafeArea()
         }
-        .frame(maxWidth: 560).padding(.horizontal, min(40, max(24, geometry.size.width * 0.08)))
-        .padding(.top, 48).padding(.bottom, 40)
-        .frame(maxWidth: .infinity).frame(
-          minHeight: addingToCurrentCourse ? 420 : geometry.size.height, alignment: .top
-        )
+        GeometryReader { panel in
+          panelContents(in: panel.size)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
         .background(
           DS.surface,
           in: UnevenRoundedRectangle(
             topLeadingRadius: addingToCurrentCourse ? 0 : 54,
             topTrailingRadius: addingToCurrentCourse ? 0 : 54))
-      }.background(addingToCurrentCourse ? DS.surface : Color(hex: 0xDCCAFA))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("upload.panel")
+        .offset(y: addingToCurrentCourse || panelPresented ? 0 : geometry.size.height + 80)
+        .padding(.top, addingToCurrentCourse ? 0 : 16)
+      }
+    }
+    .ignoresSafeArea(.container, edges: addingToCurrentCourse ? [] : .bottom)
+    .task {
+      guard !panelPresented else { return }
+      if reduceMotion || addingToCurrentCourse {
+        panelPresented = true
+      } else {
+        withAnimation(.spring(response: 0.52, dampingFraction: 0.88)) { panelPresented = true }
+      }
     }
     .fileImporter(
       isPresented: $pickerOpen, allowedContentTypes: Self.allowedTypes,
@@ -388,61 +383,109 @@ struct CourseUploadView: View {
         files.append(contentsOf: urls)
         error = nil
         store.importError = nil
-      case .failure(let issue): error = issue.localizedDescription
+      case .failure(let issue):
+        let issue = issue as NSError
+        if issue.domain != NSCocoaErrorDomain || issue.code != NSUserCancelledError {
+          error = issue.localizedDescription
+        }
       }
     }
   }
-  private var fileTiles: some View {
-    Group {
-      if files.isEmpty {
-        Button {
-          pickerOpen = true
-        } label: {
+  private var failure: String? { error ?? store.importError }
+  private var canContinueSetup: Bool {
+    !addingToCurrentCourse && !store.draft.resourceIDs.isEmpty
+  }
+
+  @ViewBuilder private func panelContents(in size: CGSize) -> some View {
+    let compact = size.height < 500
+    let gutter = min(40, max(24, size.width * 0.08))
+    if size.width > size.height * 1.2 {
+      HStack(alignment: .top, spacing: 24) {
+        fileTile(size: min(160, max(96, size.height - 40)))
+        controls(compact: true).frame(maxWidth: .infinity)
+      }.frame(maxWidth: 760).padding(.horizontal, gutter).padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+    } else {
+      let top: CGFloat = compact ? 20 : 48
+      let bottom: CGFloat = compact ? 20 : 40
+      let gap: CGFloat = compact ? 16 : 24
+      let controlCount = 2 + (files.isEmpty ? 0 : 1) + (failure == nil ? 0 : 1)
+        + (canContinueSetup ? 1 : 0)
+      let controlHeight: CGFloat = 24 + 54 + (files.isEmpty ? 0 : 44)
+        + (failure == nil ? 0 : compact ? 20 : 42) + (canContinueSetup ? 54 : 0)
+        + CGFloat(controlCount - 1) * (compact ? 8 : 16)
+      let tileSize = min(210, max(80, size.height - top - bottom - gap - controlHeight))
+      VStack(spacing: gap) {
+        fileTile(size: tileSize)
+        controls(compact: compact)
+      }.frame(maxWidth: 560).padding(.horizontal, gutter)
+        .padding(.top, top).padding(.bottom, bottom).frame(maxWidth: .infinity)
+    }
+  }
+
+  private func controls(compact: Bool) -> some View {
+    VStack(spacing: compact ? 8 : 16) {
+      if !files.isEmpty {
+        ScrollView(.horizontal) {
+          HStack(spacing: 8) {
+            ForEach(Array(files.enumerated()), id: \.offset) { index, url in
+              HStack(spacing: 4) {
+                Text(url.lastPathComponent).font(DS.font(14)).lineLimit(1)
+                  .frame(maxWidth: 220)
+                Button { files.remove(at: index) } label: {
+                  Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                }.buttonStyle(.plain).disabled(busy)
+                  .accessibilityLabel("移除 \(url.lastPathComponent)")
+              }.padding(.leading, 12).foregroundStyle(DS.text)
+                .background(DS.background, in: RoundedRectangle(cornerRadius: 12))
+            }
+          }
+        }.scrollIndicators(.hidden).frame(height: 44).accessibilityIdentifier("upload.files")
+      }
+      Text("添加课程资料").font(DS.font(16, weight: .bold)).frame(height: 24)
+      if let failure {
+        Text(failure).font(DS.font(14)).foregroundStyle(DS.danger)
+          .lineLimit(compact ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityIdentifier("upload.error")
+      }
+      BCButton(busy ? "正在整理…" : "保存资料并继续") { saveFiles() }.disabled(files.isEmpty || busy)
+        .accessibilityIdentifier("upload.save")
+      if canContinueSetup {
+        BCButton("继续设置课程", style: .secondary) {
+          store.go(store.draft.parseCompleted ? .courseSetup : .parseReady)
+        }
+      }
+    }
+  }
+
+  private func fileTile(size: CGFloat) -> some View {
+    Button {
+      pickerOpen = true
+    } label: {
+      ZStack {
+        if files.isEmpty {
           Image(systemName: "plus").font(.system(size: 38, weight: .medium)).foregroundStyle(
             DS.text
           )
-          .frame(width: 210, height: 210).background(
-            DS.surface, in: RoundedRectangle(cornerRadius: 18)
-          )
-          .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0xE1E6EE), lineWidth: 1.5))
-          .shadow(color: DS.text.opacity(0.12), radius: 14, x: 0, y: 12)
-        }.buttonStyle(.plain).disabled(busy).accessibilityLabel("选择课程资料").accessibilityIdentifier(
-          "upload.select")
-      } else {
-        LazyVGrid(
-          columns: [GridItem(.adaptive(minimum: 48, maximum: 48))], alignment: .leading, spacing: 16
-        ) {
-          ForEach(Array(files.enumerated()), id: \.offset) { index, url in
-            ZStack(alignment: .topTrailing) {
-              StickerIcon("FileText", size: 48)
-                .overlay(alignment: .bottomTrailing) {
-                  Text("\(index + 1)").font(DS.font(10, weight: .bold)).foregroundStyle(.white)
-                    .frame(minWidth: 18, minHeight: 18).background(DS.primary, in: Circle())
-                    .overlay(Circle().stroke(.white, lineWidth: 2)).offset(x: 2, y: 2)
-                }
-              Button {
-                files.remove(at: index)
-              } label: {
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(
-                  .white
-                ).frame(width: 14, height: 14).background(DS.danger, in: Circle()).frame(
-                  width: 32, height: 32)
-              }.buttonStyle(.plain).disabled(busy).accessibilityLabel("移除 \(url.lastPathComponent)")
-                .offset(x: 12, y: -12)
-            }
+        } else {
+          ForEach(0..<min(3, files.count), id: \.self) { index in
+            StickerIcon("FileText", size: size * 0.44)
+              .rotationEffect(.degrees(Double(index - min(2, files.count - 1)) * 8))
+              .offset(x: CGFloat(index) * 8 - 8, y: -CGFloat(index) * 3)
           }
-          Button {
-            pickerOpen = true
-          } label: {
-            Image(systemName: "plus").font(.system(size: 28)).foregroundStyle(DS.text).frame(
-              width: 44, height: 44)
-          }.buttonStyle(.plain).disabled(busy).accessibilityLabel("继续添加资料")
-        }.padding(20).frame(width: 228).frame(minHeight: 210, alignment: .topLeading)
-          .background(DS.surface, in: RoundedRectangle(cornerRadius: 18))
-          .overlay(RoundedRectangle(cornerRadius: 18).stroke(DS.primarySoft, lineWidth: 1.5))
-          .shadow(color: DS.primaryPressed.opacity(0.14), radius: 14, x: 0, y: 12)
+          Text("\(files.count)").font(DS.font(14, weight: .bold)).foregroundStyle(.white)
+            .padding(.horizontal, 8).frame(minWidth: 28, minHeight: 28)
+            .background(DS.primary, in: Capsule()).offset(x: size * 0.22, y: size * 0.22)
+        }
       }
-    }.padding(.top, 16).padding(.bottom, 6)
+      .frame(width: size, height: size)
+      .background(DS.surface, in: RoundedRectangle(cornerRadius: 18))
+      .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0xE1E6EE), lineWidth: 1.5))
+      .shadow(color: DS.text.opacity(0.12), radius: 14, x: 0, y: 12)
+    }.buttonStyle(.plain).disabled(busy)
+      .accessibilityLabel(files.isEmpty ? "选择课程资料" : "继续添加资料")
+      .accessibilityIdentifier("upload.select")
   }
   private func saveFiles() {
     guard !files.isEmpty else { return }

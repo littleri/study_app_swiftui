@@ -5,6 +5,25 @@ import XCTest
 @testable import BookCourse
 
 final class CoreTests: XCTestCase {
+  @MainActor func testLastSelectedLearningCourseSurvivesRelaunch() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = AppStore(repository: try LocalBookCourseRepository(directory: directory))
+    await store.boot()
+    let course = try XCTUnwrap(store.courses.first {
+      $0.resourceIDs.contains("catalog_high_school_math_required_2")
+    })
+    store.selectCourse(course.id)
+    store.go(.study)
+    await store.flush()
+
+    let reopened = AppStore(repository: try LocalBookCourseRepository(directory: directory))
+    await reopened.boot()
+    XCTAssertEqual(reopened.currentCourse?.id, course.id)
+    XCTAssertEqual(reopened.selectedBookID, "catalog_high_school_math_required_2")
+    await reopened.flush()
+  }
+
   func testEveryBundledSourceDecodesWithoutLosingIDs() throws {
     let sources = try ContentBundle.load([SourceContent].self, name: "sources")
     XCTAssertEqual(sources.count, 6)

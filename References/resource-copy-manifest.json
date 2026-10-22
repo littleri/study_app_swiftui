@@ -1432,10 +1432,16 @@
       "sha256": "8423899d2b2f4d2a969325eacce9a785a65a81f75c9adaa81657acc95fc80775"
     },
     {
-      "source": "ios/App/App/Base.lproj/LaunchScreen.storyboard",
+      "source": "Resources/LaunchScreen.storyboard",
       "path": "Resources/LaunchScreen.storyboard",
-      "bytes": 2892,
-      "sha256": "782492c6403f56a76c64cfad72bc2031b7453e7196a79c9fa8f2fa602dbddb4c"
+      "bytes": 3953,
+      "sha256": "794b3b77f77970458958bd12dc8bf9c0842b06aa5e104288be72a077a4347526",
+      "original_source": {
+        "source": "ios/App/App/Base.lproj/LaunchScreen.storyboard",
+        "bytes": 2892,
+        "sha256": "782492c6403f56a76c64cfad72bc2031b7453e7196a79c9fa8f2fa602dbddb4c"
+      },
+      "derivation": "32pt circular corner overlay matching the SwiftUI startup image clip; original blue Splash artwork unchanged."
     },
     {
       "source": "ios/App/App/Assets.xcassets/Splash.imageset/Contents.json",

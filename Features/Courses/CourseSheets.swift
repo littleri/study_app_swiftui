@@ -40,6 +40,7 @@ struct CourseSwitcherView: View {
                 }
             }.buttonStyle(.plain).accessibilityAddTraits(
               course.id == store.selectedCourseID ? .isSelected : [])
+              .accessibilityIdentifier("study.course.\(course.id)")
           }
         }
       }.frame(height: min(390, CGFloat(store.courses.count) * 70))

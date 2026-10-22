@@ -333,7 +333,8 @@ struct NotesSourceReaderView: View {
         )
         .background(.white, in: RoundedRectangle(cornerRadius: 12)).overlay(
           RoundedRectangle(cornerRadius: 12).stroke(DS.border))
-      }.accessibilityLabel("返回")
+      }.offset(y: DS.navigationButtonOffset)
+        .accessibilityLabel("返回").accessibilityIdentifier("navigation.back")
       Button {
         showPageControls = true
       } label: {
@@ -341,6 +342,7 @@ struct NotesSourceReaderView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       .buttonStyle(.plain).accessibilityLabel("\(heading)，PDF第\(page)页，点击跳转")
+      .accessibilityIdentifier("reader.heading")
       .popover(isPresented: $showPageControls) {
         VStack(spacing: 14) {
           Text("PDF 第 \(page) 页 / \(maxPage) 页").font(DS.font(14, weight: .bold))
@@ -352,7 +354,7 @@ struct NotesSourceReaderView: View {
         }.padding(20).frame(width: 330).presentationCompactAdaptation(.popover)
       }
       if saving { ProgressView().scaleEffect(0.7).accessibilityLabel("正在保存笔迹") }
-    }.frame(height: 44).padding(.horizontal, store.isPad ? 32 : 16)
+    }.frame(height: DS.navigationRowHeight).padding(.horizontal, store.isPad ? 32 : 16)
       .padding(.top, NotesScreenMetrics.titleTopInset).padding(.bottom, 1)
       .background { Color.white.ignoresSafeArea(edges: .top) }
   }

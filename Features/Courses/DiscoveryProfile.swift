@@ -5,6 +5,7 @@ struct CourseDiscoveryView: View {
   @State private var query = ""
   @State private var category = "推荐"
   @State private var allCategories = false
+  @FocusState private var searchFocused: Bool
   private let categories = ["推荐", "生物", "数学", "物理", "化学", "历史", "地理", "语文", "英语"]
   private var books: [CommunityBook] {
     let search = query.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
@@ -19,90 +20,126 @@ struct CourseDiscoveryView: View {
         ] + book.tags).joined(separator: " ").localizedLowercase.contains(search)
     }
   }
+  @State private var pullDistance: CGFloat = 0
+  @State private var refreshPhase: DiscoveryRefreshPhase = .idle
+  @State private var refreshSummary = "下拉刷新课程"
+  @State private var refreshRequest = 0
+
   var body: some View {
     GeometryReader { geometry in
       let gutter = store.isPad ? 32.0 : max(16.0, geometry.size.width * 0.04)
-      ScrollView {
-        LazyVStack(
-          alignment: .leading, spacing: store.isPad ? 18 : 10, pinnedViews: [.sectionHeaders]
-        ) {
-          Section {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(
-                query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                  ? (category == "推荐"
-                    ? "为你推荐 \(books.count) 本书" : "\(category)分类共 \(books.count) 本书")
-                  : "“\(query.trimmingCharacters(in: .whitespacesAndNewlines))”找到 \(books.count) 本书"
-              ).font(DS.font(20)).foregroundStyle(DS.secondary).frame(height: 28, alignment: .top)
-              if books.isEmpty {
-                EmptyStateView(
-                  title: "没有找到相关课程", message: "换个关键词，或查看其他课程分类。",
-                  asset: "/assets/brand/empty-states/no-results-v1.png")
-                BCButton("清除搜索", style: .secondary) {
-                  query = ""
-                  category = "推荐"
-                }
-              }
-              LazyVGrid(
-                columns: [
-                  GridItem(.flexible(), spacing: store.isPad ? 12 : 10),
-                  GridItem(.flexible(), spacing: store.isPad ? 12 : 10),
-                ],
-                alignment: .leading, spacing: store.isPad ? 12 : 10
-              ) {
-                ForEach(books) { book in
-                  Button {
-                    store.selectedCommunityID = book.id
-                    store.go(.communityBook)
-                  } label: {
-                    CommunityCourseTile(book: book, horizontal: store.isPad)
-                  }.buttonStyle(.plain).accessibilityLabel("\(book.title)，\(book.subject)，查看课程")
-                }
-              }
-            }.frame(maxWidth: 820, alignment: .leading)
-          } header: {
-            VStack(alignment: .leading, spacing: 12) {
-              HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").font(.system(size: 19))
-                TextField("搜索课程", text: $query).font(DS.font(20)).submitLabel(.search)
-                  .autocorrectionDisabled().accessibilityIdentifier("community.search")
-                if !query.isEmpty {
-                  Button {
+      VStack(spacing: 0) {
+        searchHeader
+          .padding(.horizontal, gutter).padding(.top, 4).padding(.bottom, 12)
+          .navigationBarSurface()
+        ScrollView {
+          LazyVStack(
+            alignment: .leading, spacing: store.isPad ? 18 : 10, pinnedViews: [.sectionHeaders]
+          ) {
+            Section {
+              VStack(alignment: .leading, spacing: 4) {
+                if books.isEmpty {
+                  EmptyStateView(
+                    title: "没有找到相关课程", message: "换个关键词，或查看其他课程分类。",
+                    asset: "/assets/brand/empty-states/no-results-v1.png")
+                  BCButton("清除搜索", style: .secondary) {
                     query = ""
-                  } label: {
-                    Image(systemName: "xmark").frame(width: 44, height: 44)
-                  }.buttonStyle(.plain).accessibilityLabel("清除搜索内容")
+                    category = "推荐"
+                  }
                 }
-              }.padding(.horizontal, 14).frame(height: 52).frame(maxWidth: 820).background(
-                DS.surface, in: Capsule()
-              ).overlay(Capsule().stroke(DS.border))
-              HStack(spacing: 0) {
-                ScrollView(.horizontal) {
-                  HStack(spacing: 0) { ForEach(categories, id: \.self) { categoryButton($0) } }
-                    .padding(.horizontal, gutter)
-                }.scrollIndicators(.hidden)
-                Button {
-                  withAnimation { allCategories.toggle() }
-                } label: {
-                  Image(systemName: allCategories ? "chevron.up" : "chevron.down").frame(
-                    width: 44, height: 44
-                  ).background(DS.background.opacity(0.9))
-                }.buttonStyle(.plain).accessibilityLabel(allCategories ? "收起全部分类" : "查看更多分类")
-              }.padding(.horizontal, -gutter)
-              if allCategories {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 74))], spacing: 8) {
-                  ForEach(categories, id: \.self) { categoryButton($0) }
-                }.padding(12).background(DS.surface, in: RoundedRectangle(cornerRadius: 14))
-                  .overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
-              }
-            }.padding(.top, 4)
-              .padding(.horizontal, gutter)
-              .navigationBarSurface()
-              .padding(.horizontal, -gutter)
-          }
-        }.padding(.horizontal, gutter).padding(.bottom, 28).frame(
-          maxWidth: .infinity, alignment: .leading)
-      }.scrollDismissesKeyboard(.interactively)
+                LazyVGrid(
+                  columns: [
+                    GridItem(.flexible(), spacing: store.isPad ? 12 : 10),
+                    GridItem(.flexible(), spacing: store.isPad ? 12 : 10),
+                  ],
+                  alignment: .leading, spacing: store.isPad ? 12 : 10
+                ) {
+                  ForEach(books) { book in
+                    Button {
+                      store.selectedCommunityID = book.id
+                      store.go(.communityBook)
+                    } label: {
+                      CommunityCourseTile(book: book)
+                    }.buttonStyle(.plain).accessibilityLabel("\(book.title)，\(book.subject)，查看课程")
+                  }
+                }
+              }.frame(maxWidth: 820, alignment: .leading)
+            } header: {
+              categoryHeader(gutter: gutter)
+                .padding(.horizontal, gutter)
+                .background(DS.background)
+                .overlay(alignment: .bottom) {
+                  ProgressiveMaterial(top: true).frame(height: 24).offset(y: 24)
+                    .allowsHitTesting(false)
+                }
+                .padding(.horizontal, -gutter)
+            }
+          }.padding(.horizontal, gutter).padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+              DiscoveryRefreshBridge(
+                request: refreshRequest,
+                onPull: { pullDistance = $0 },
+                onPhase: { phase in
+                  refreshPhase = phase
+                  if phase == .loading { refreshSummary = "正在刷新课程" }
+                  if phase == .launching { refreshSummary = "课程已更新" }
+                  if phase == .failed { refreshSummary = "刷新失败，请重试" }
+                },
+                refresh: { try await store.refreshCommunity() })
+            }
+        }
+        .accessibilityIdentifier("community.scroll")
+        .accessibilityValue(refreshSummary)
+        .accessibilityAction(named: Text("刷新课程")) { refreshRequest += 1 }
+        .scrollDismissesKeyboard(.interactively)
+        .overlay(alignment: .top) {
+          DiscoveryRefreshScene(distance: pullDistance, phase: refreshPhase)
+            .allowsHitTesting(false)
+        }
+      }
+    }
+  }
+
+  private var searchHeader: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "magnifyingglass").font(.system(size: 19))
+      TextField("搜索课程", text: $query).font(DS.font(20)).submitLabel(.search)
+        .focused($searchFocused).onSubmit { searchFocused = false }
+        .autocorrectionDisabled().accessibilityIdentifier("community.search")
+      if !query.isEmpty {
+        Button {
+          query = ""
+        } label: {
+          Image(systemName: "xmark").frame(width: 44, height: 44)
+        }.buttonStyle(.plain).accessibilityLabel("清除搜索内容")
+      }
+    }.padding(.horizontal, 14).frame(height: 52).frame(maxWidth: 820)
+      .background(DS.surface, in: Capsule()).overlay(Capsule().stroke(DS.border))
+      .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private func categoryHeader(gutter: CGFloat) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 0) {
+        ScrollView(.horizontal) {
+          HStack(spacing: 0) { ForEach(categories, id: \.self) { categoryButton($0) } }
+            .padding(.horizontal, gutter)
+        }.scrollIndicators(.hidden)
+        Button {
+          withAnimation { allCategories.toggle() }
+        } label: {
+          Image(systemName: allCategories ? "chevron.up" : "chevron.down").frame(
+            width: 44, height: 44
+          ).background(DS.background.opacity(0.9))
+        }.buttonStyle(.plain).accessibilityLabel(allCategories ? "收起全部分类" : "查看更多分类")
+      }.padding(.horizontal, -gutter)
+      if allCategories {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 74))], spacing: 8) {
+          ForEach(categories, id: \.self) { categoryButton($0) }
+        }.padding(12).background(DS.surface, in: RoundedRectangle(cornerRadius: 14))
+          .overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
+      }
     }
   }
   private func categoryButton(_ value: String) -> some View {
@@ -122,19 +159,6 @@ struct CourseDiscoveryView: View {
 
 private struct CommunityCourseTile: View {
   let book: CommunityBook
-  var horizontal: Bool
-  private var tint: Color {
-    switch book.subject {
-    case "生物": Color(hex: 0xDFF5EB)
-    case "数学": Color(hex: 0xE2EAFF)
-    case "物理": Color(hex: 0xE8EDF4)
-    case "化学": DS.primarySoft
-    case "英语": Color(hex: 0xFFF1E3)
-    case "历史": Color(hex: 0xFFF7DD)
-    case "地理": Color(hex: 0xE7F2FB)
-    default: Color(hex: 0xFFF0F2)
-    }
-  }
   var body: some View {
     VStack(spacing: 0) {
       visual
@@ -144,24 +168,25 @@ private struct CommunityCourseTile: View {
     ).shadow(color: DS.text.opacity(0.10), radius: 4, x: 0, y: 3)
   }
   private var visual: some View {
-    AssetImage(book.cover, contentMode: .fill).frame(
-      width: horizontal ? 106 : 90, height: horizontal ? 143.333 : 122
-    ).clipped().padding(3).background(.white).clipShape(RoundedRectangle(cornerRadius: 8)).shadow(
-      color: DS.text.opacity(0.12), radius: 3, x: 0, y: 2
-    ).padding(12).frame(
-      maxWidth: .infinity, minHeight: horizontal ? 173.333 : 152,
-      alignment: horizontal ? .leading : .center
-    ).background(tint)
+    GeometryReader { geometry in
+      let coverWidth = geometry.size.width * 0.80
+      AssetImage(book.cover).frame(width: coverWidth, height: coverWidth * 1.355)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 2))
+        .shadow(color: DS.text.opacity(0.18), radius: 10, x: 6, y: 12)
+        .rotationEffect(.degrees(-4))
+        .position(x: geometry.size.width / 2, y: geometry.size.height / 2 - 3)
+    }
+    .aspectRatio(0.80, contentMode: .fit)
+    .background(DS.background)
   }
   private var copy: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(alignment: .leading, spacing: 8) {
       Text(book.catalogTitle).font(DS.font(16, weight: .bold)).foregroundStyle(DS.text).lineLimit(2)
         .frame(maxWidth: .infinity, minHeight: 20.8, alignment: .topLeading)
-      HStack(alignment: .bottom, spacing: 4) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("\(book.grade) · \(book.version)").lineLimit(1).frame(height: 18.9, alignment: .top)
-          Text("\(book.learners) 人学习").frame(height: 18.9, alignment: .top)
-        }.font(DS.font(14)).foregroundStyle(DS.secondary)
+      HStack(spacing: 4) {
+        Text("\(book.learners) 人学习").font(DS.font(14)).foregroundStyle(DS.secondary)
+          .lineLimit(1).minimumScaleFactor(0.75)
         Spacer(minLength: 0)
         Text("进入").font(DS.font(14, weight: .bold)).foregroundStyle(.white).padding(.horizontal, 12)
           .frame(minWidth: 56, minHeight: 36).background(DS.primary, in: Capsule())
@@ -248,6 +273,8 @@ struct CommunityBookDetailView: View {
 
 struct LearnerProfileView: View {
   @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  @State private var compactHeader = false
   @State private var editing = false
   @State private var name = ""
   @State private var goal = ""
@@ -260,13 +287,35 @@ struct LearnerProfileView: View {
   private var pendingTasks: [StudyTask] {
     tasks.filter { $0.status != "done" && $0.status != "completed" }
   }
+  private var headerTopInset: CGFloat { store.isPad ? 42 : 4 }
+
   var body: some View {
-    CourseFeaturePage(topInset: store.isPad ? 42 : 4, spacing: 12) {
-      HStack {
-        Color.clear.frame(width: 44, height: 44)
-        Spacer()
-        Text("我的").font(DS.font(27.2, weight: .bold)).frame(height: 44, alignment: .top)
-        Spacer()
+    GeometryReader { geometry in
+      profilePage
+        .accessibilityIdentifier("profile.scroll")
+        .overlay(alignment: .top) {
+          profileHeader
+            .frame(maxWidth: 1120)
+            .padding(.horizontal, min(32, max(16, geometry.size.width * 0.04)))
+            .frame(maxWidth: .infinity)
+            .padding(.top, headerTopInset)
+            .navigationBarSurface()
+        }
+    }
+  }
+
+  private var profileHeader: some View {
+    ZStack(alignment: .trailing) {
+      HStack(spacing: 0) {
+        if compactHeader { Spacer(minLength: 0) }
+        Text("我的").font(DS.font(27.2, weight: .bold))
+          .foregroundStyle(DS.text)
+          .frame(height: DS.navigationRowHeight, alignment: .top)
+          .accessibilityAddTraits(.isHeader)
+          .accessibilityIdentifier("profile.title")
+        Spacer(minLength: 0)
+      }
+      if !compactHeader {
         Button {
           store.go(.settings)
         } label: {
@@ -274,8 +323,29 @@ struct LearnerProfileView: View {
             DS.primaryPressed
           ).background(Color(hex: 0xF7F3FF), in: RoundedRectangle(cornerRadius: 12)).overlay(
             RoundedRectangle(cornerRadius: 12).stroke(Color(hex: 0xDED4F7)))
-        }.buttonStyle(.plain).accessibilityLabel("设置")
+        }.buttonStyle(.plain).offset(y: DS.navigationButtonOffset).accessibilityLabel("设置")
+          .accessibilityIdentifier("profile.settings")
+          .transition(.opacity)
       }
+    }.frame(height: DS.navigationRowHeight)
+  }
+
+  private var profilePage: some View {
+    CourseFeaturePage(topInset: headerTopInset, spacing: 12) {
+      // Reserve a stable header slot in the document so switching alignment
+      // never changes the scroll offset or moves the cards beneath the bar.
+      Color.clear.frame(height: DS.navigationRowHeight)
+        .accessibilityHidden(true)
+        .onGeometryChange(for: Int.self) { geometry in
+          let offset = headerTopInset - geometry.frame(in: .scrollView).minY
+          return offset > 16 ? 2 : offset > 4 ? 1 : 0
+        } action: { region in
+          let next = region == 2 || (compactHeader && region == 1)
+          guard next != compactHeader else { return }
+          withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+            compactHeader = next
+          }
+        }
       BCCard {
         VStack(spacing: 12) {
           HStack {

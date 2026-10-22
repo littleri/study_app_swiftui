@@ -2,11 +2,7 @@ import SwiftUI
 
 struct CourseHomeView: View {
   @Environment(AppStore.self) private var store
-  @Environment(\.bookCourseReduceMotion) private var reduceMotion
   @Environment(\.verticalSizeClass) private var verticalSizeClass
-  @State private var focusedCourseID: String?
-  @State private var scrollCourseID: String?
-  @State private var interactedWithShelf = false
   private var homeCourses: [Course] {
     var result = store.courses
     if let biology = result.firstIndex(where: { $0.resourceIDs.contains("book_biology_2") }),
@@ -19,7 +15,7 @@ struct CourseHomeView: View {
     return result
   }
   private var selected: Course? {
-    store.courses.first { $0.id == focusedCourseID } ?? store.currentCourse ?? store.courses.first
+    store.currentCourse ?? store.courses.first
   }
   private var nextChapter: Chapter? {
     CourseHomeNextStep.resolve(
@@ -32,7 +28,7 @@ struct CourseHomeView: View {
   var body: some View {
     CourseFeaturePage(width: 920, topInset: store.isPad ? 42 : 4) {
       Text("Hi，\(store.preferences?.displayName ?? "同学")").font(DS.font(27.2, weight: .bold)).frame(
-        maxWidth: .infinity, alignment: .center
+        maxWidth: .infinity, alignment: .leading
       ).frame(height: 44, alignment: .top)
       VStack(alignment: .leading, spacing: 0) {
         CourseSectionHeading(
@@ -54,7 +50,6 @@ struct CourseHomeView: View {
         }.padding(.top, -8)
       }
     }
-    .onAppear { focusedCourseID = store.selectedCourseID ?? store.courses.first?.id }
   }
   private var emptyShelf: some View {
     BCCard {
@@ -77,51 +72,10 @@ struct CourseHomeView: View {
       let controlsWidth = min(252.0, max(128.0, geometry.size.width * 0.30))
       let railWidth = geometry.size.width - controlsWidth - 16 + gutter
       HStack(alignment: .top, spacing: 16) {
-        ScrollView(.horizontal) {
-          HStack(alignment: .center, spacing: -coverWidth * 0.32) {
-            ForEach(homeCourses) { course in
-              Button {
-                interactedWithShelf = true
-                if selected?.id == course.id {
-                  store.selectCourse(course.id)
-                  store.go(.study)
-                } else {
-                  choose(course.id)
-                  scrollCourseID = course.id
-                }
-              } label: {
-                CourseCoverImage(path: store.courseFeatureCover(course))
-                  .frame(width: coverWidth, height: coverHeight).clipped()
-                  .clipShape(RoundedRectangle(cornerRadius: 8))
-                  .blur(radius: selected?.id == course.id ? 0 : 1.5)
-                  .shadow(color: DS.text.opacity(0.13), radius: 4, x: 0, y: 5)
-                  .scaleEffect(selected?.id == course.id ? 1.16 : 0.9)
-                  .padding(.vertical, short ? 16 : 24)
-              }
-              .buttonStyle(.plain).id(course.id).zIndex(selected?.id == course.id ? 2 : 1)
-              .accessibilityLabel(
-                "\(course.name)，\(selected?.id == course.id ? "当前选中，点击进入课程详情" : "点击切换到这门课程")"
-              )
-              .accessibilityAddTraits(selected?.id == course.id ? .isSelected : [])
-            }
-          }.scrollTargetLayout()
-            .padding(.leading, max(0, railWidth * 0.42 - coverWidth / 2))
-            .padding(.trailing, max(0, railWidth * 0.58 - coverWidth / 2))
-        }
-        .scrollIndicators(.hidden).scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: $scrollCourseID, anchor: .center)
-        .onChange(of: scrollCourseID) { _, id in if interactedWithShelf, let id { choose(id) } }
-        .simultaneousGesture(
-          DragGesture(minimumDistance: 4).onChanged { _ in interactedWithShelf = true }
-        )
-        .mask(
-          LinearGradient(
-            stops: [
-              .init(color: .white, location: 0), .init(color: .white, location: 0.78),
-              .init(color: .clear, location: 1),
-            ], startPoint: .leading, endPoint: .trailing)
-        )
-        .frame(width: railWidth).padding(.leading, -gutter)
+        HomeCourseShelf(
+          courses: homeCourses, selectedCourseID: selected?.id,
+          coverWidth: coverWidth, coverHeight: coverHeight, railWidth: railWidth, short: short
+        ).frame(width: railWidth).padding(.leading, -gutter)
         VStack(alignment: .trailing, spacing: 12) {
           Button {
             store.go(.library)
@@ -321,15 +275,109 @@ struct CourseHomeView: View {
             style: StrokeStyle(lineWidth: 1, dash: route == .courseDetail ? [3, 3] : [])))
     }.buttonStyle(.plain).accessibilityHint(helper)
   }
-  private func choose(_ id: String) {
-    withAnimation(reduceMotion ? nil : DS.localAnimation) {
-      focusedCourseID = id
-      store.selectCourse(id)
-    }
-  }
   private func create() {
     store.courseFeatureStartDraft()
     store.go(.upload)
+  }
+}
+
+private struct HomeCourseShelf: View {
+  @Environment(AppStore.self) private var store
+  @Environment(\.bookCourseReduceMotion) private var reduceMotion
+  let courses: [Course]
+  let selectedCourseID: String?
+  let coverWidth: CGFloat
+  let coverHeight: CGFloat
+  let railWidth: CGFloat
+  let short: Bool
+  @State private var scrollCourseID: String?
+  @State private var interactedWithShelf = false
+
+  init(
+    courses: [Course], selectedCourseID: String?, coverWidth: CGFloat,
+    coverHeight: CGFloat, railWidth: CGFloat, short: Bool
+  ) {
+    self.courses = courses
+    self.selectedCourseID = selectedCourseID
+    self.coverWidth = coverWidth
+    self.coverHeight = coverHeight
+    self.railWidth = railWidth
+    self.short = short
+    // ScrollView needs its restored ID on its first layout, before it publishes
+    // the leading visible item back through the scroll-position binding.
+    _scrollCourseID = State(initialValue: selectedCourseID)
+  }
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      ScrollView(.horizontal) {
+        HStack(alignment: .center, spacing: -coverWidth * 0.32) {
+          ForEach(courses) { course in
+            Button {
+              interactedWithShelf = true
+              if selectedCourseID == course.id {
+                store.selectCourse(course.id)
+                store.go(.study)
+              } else {
+                choose(course.id)
+                scrollCourseID = course.id
+              }
+            } label: {
+              CourseCoverImage(path: store.courseFeatureCover(course))
+                .frame(width: coverWidth, height: coverHeight).clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .blur(radius: selectedCourseID == course.id ? 0 : 1.5)
+                .shadow(color: DS.text.opacity(0.13), radius: 4, x: 0, y: 5)
+                .scaleEffect(selectedCourseID == course.id ? 1.16 : 0.9)
+                .padding(.vertical, short ? 16 : 24)
+            }
+            .buttonStyle(.plain).id(course.id).zIndex(selectedCourseID == course.id ? 2 : 1)
+            .accessibilityIdentifier("home.course.\(course.id)")
+            .accessibilityLabel(
+              "\(course.name)，\(selectedCourseID == course.id ? "当前选中，点击进入课程详情" : "点击切换到这门课程")"
+            )
+            .accessibilityAddTraits(selectedCourseID == course.id ? .isSelected : [])
+          }
+        }.scrollTargetLayout()
+      }
+      .contentMargins(.horizontal, max(0, (railWidth - coverWidth) / 2), for: .scrollContent)
+      .scrollIndicators(.hidden).scrollTargetBehavior(.viewAligned)
+      .scrollPosition(id: $scrollCourseID, anchor: .center)
+      .onChange(of: scrollCourseID) { _, id in if interactedWithShelf, let id { choose(id) } }
+      .simultaneousGesture(
+        DragGesture(minimumDistance: 4).onChanged { _ in interactedWithShelf = true }
+      )
+      .mask(
+        LinearGradient(
+          stops: [
+            .init(color: .white, location: 0), .init(color: .white, location: 0.88),
+            .init(color: .clear, location: 1),
+          ], startPoint: .leading, endPoint: .trailing)
+      )
+      .accessibilityIdentifier("home.course.shelf")
+      .onAppear {
+        interactedWithShelf = false
+        restorePosition()
+      }
+      .onChange(of: selectedCourseID) { _, _ in restorePosition() }
+      .task {
+        await Task.yield()
+        guard !Task.isCancelled, let selectedCourseID else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo(selectedCourseID, anchor: .center) }
+      }
+    }
+  }
+  private func choose(_ id: String) {
+    guard selectedCourseID != id else { return }
+    withAnimation(reduceMotion ? nil : DS.localAnimation) { store.selectCourse(id) }
+  }
+  private func restorePosition() {
+    guard scrollCourseID != selectedCourseID else { return }
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) { scrollCourseID = selectedCourseID }
   }
 }
 

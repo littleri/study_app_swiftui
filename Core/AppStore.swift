@@ -200,8 +200,20 @@ import SwiftUI
     }
   }
   var locationKey: String { "\(selectedCourseID ?? "")::\(selectedBookID ?? "")" }
+  /// Reload the bundled discovery catalog while preserving the view's search and category.
+  func refreshCommunity() async throws {
+    let refreshed = try await Task.detached(priority: .userInitiated) {
+      try ContentBundle.load([CommunityBook].self, name: "community")
+    }.value
+    try Task.checkCancellation()
+    community = refreshed
+  }
+
   func boot() async {
     guard isLoading else { return }
+    let clock = ContinuousClock()
+    let minimumSplashDeadline = clock.now.advanced(by: .milliseconds(500))
+    var startupError: String?
     do {
       sources = try await repository.loadSources()
       community = try ContentBundle.load([CommunityBook].self, name: "community")
@@ -335,11 +347,15 @@ import SwiftUI
       }
       if arguments.contains("--assistant") { globalAssistantOpen = true }
       persist()
-      isLoading = false
     } catch {
-      bootError = error.localizedDescription
-      isLoading = false
+      startupError = error.localizedDescription
     }
+    // Loading and the minimum display time overlap; slow launches incur no extra delay.
+    if clock.now < minimumSplashDeadline {
+      try? await clock.sleep(until: minimumSplashDeadline)
+    }
+    bootError = startupError
+    isLoading = false
   }
   private func seedMistakeIfNeeded() {
     guard mistakes.isEmpty, let data = try? ContentBundle.data("Data/demo-state.json"),

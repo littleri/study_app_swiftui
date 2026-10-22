@@ -23,9 +23,16 @@
                                     <constraint firstAttribute="height" constant="144" id="logo-height"/>
                                 </constraints>
                             </imageView>
+                            <imageView userInteractionEnabled="NO" contentMode="scaleToFill" image="SplashCorners" translatesAutoresizingMaskIntoConstraints="NO" id="launch-logo-corners">
+                                <rect key="frame" x="115.5" y="261.5" width="144" height="144"/>
+                            </imageView>
                         </subviews>
                         <color key="backgroundColor" red="0.9960784314" green="0.9921568627" blue="0.9803921569" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
+                            <constraint firstItem="launch-logo-corners" firstAttribute="leading" secondItem="launch-logo" secondAttribute="leading" id="corners-leading"/>
+                            <constraint firstItem="launch-logo-corners" firstAttribute="trailing" secondItem="launch-logo" secondAttribute="trailing" id="corners-trailing"/>
+                            <constraint firstItem="launch-logo-corners" firstAttribute="top" secondItem="launch-logo" secondAttribute="top" id="corners-top"/>
+                            <constraint firstItem="launch-logo-corners" firstAttribute="bottom" secondItem="launch-logo" secondAttribute="bottom" id="corners-bottom"/>
                             <constraint firstItem="launch-logo" firstAttribute="centerX" secondItem="snD-IY-ifK" secondAttribute="centerX" id="logo-center-x"/>
                             <constraint firstItem="launch-logo" firstAttribute="centerY" secondItem="snD-IY-ifK" secondAttribute="centerY" id="logo-center-y"/>
                         </constraints>
@@ -38,5 +45,6 @@
     </scenes>
     <resources>
         <image name="Splash" width="512" height="512"/>
+        <image name="SplashCorners" width="144" height="144"/>
     </resources>
 </document>
