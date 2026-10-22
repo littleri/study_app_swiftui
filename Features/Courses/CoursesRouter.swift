@@ -226,12 +226,11 @@ extension AppStore {
     }
     persist()
   }
-  func courseFeatureCover(_ course: Course) -> String {
+  func courseFeatureCover(_ course: Course) -> String? {
     let bookID = course.activeResourceID ?? course.resourceIDs.first
     return sources.first { $0.id == bookID }?.summary.cover_url
       ?? community.first { $0.id == bookID }?.cover
       ?? shelf.first { $0.bookId == bookID }?.coverUrl
-      ?? "/assets/brand/cloud-mascot-home.png"
   }
   func courseFeatureProgress(_ course: Course) -> Double {
     let tasks = sources.filter { course.resourceIDs.contains($0.id) }.flatMap { $0.plan.tasks }
@@ -262,9 +261,37 @@ struct CourseBadgeIcon: View {
 }
 
 /// Shared source composition: the cover crosses from the lavender stage into the white sheet.
+struct CourseCoverImage: View {
+  let path: String?
+  var contentMode: ContentMode = .fill
+  var documentKind: String? = nil
+
+  var body: some View {
+    Group {
+      if let path, ContentBundle.url(path) != nil {
+        AssetImage(path, contentMode: contentMode)
+      } else {
+        ZStack {
+          DS.primarySoft
+          if let documentKind {
+            VStack(spacing: 12) {
+              StickerIcon("FileText", size: 56)
+              Text(documentKind).font(DS.font(20, weight: .bold))
+              Text("AI 课程资料").font(DS.font(14)).foregroundStyle(DS.secondary)
+            }
+          } else {
+            BCGlyph("FileText", color: DS.primary).frame(width: 30, height: 30)
+          }
+        }
+      }
+    }.accessibilityHidden(true)
+  }
+}
+
 struct CourseCoverToContent<Content: View, Action: View>: View {
-  let cover: String
+  let cover: String?
   var parsing = false
+  var documentKind: String? = nil
   @ViewBuilder let content: () -> Content
   @ViewBuilder let action: () -> Action
   @Environment(AppStore.self) private var store
@@ -302,7 +329,7 @@ struct CourseCoverToContent<Content: View, Action: View>: View {
               DS.surface, in: UnevenRoundedRectangle(topLeadingRadius: 56, topTrailingRadius: 56))
         }
         .overlay(alignment: .top) {
-          AssetImage(cover, contentMode: .fill).frame(
+          CourseCoverImage(path: cover, documentKind: documentKind).frame(
             width: coverWidth - 8, height: coverHeight - 8
           ).clipped().padding(4).background(.white, in: RoundedRectangle(cornerRadius: 8)).shadow(
             color: DS.text.opacity(0.18), radius: 4, x: 0, y: 4

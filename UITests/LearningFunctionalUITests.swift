@@ -8,11 +8,12 @@ final class LearningFunctionalUITests: XCTestCase {
     XCUIDevice.shared.orientation = .portrait
   }
 
-  private func launch(_ route: String, session: String) -> XCUIApplication {
+  private func launch(_ route: String, session: String, reduceMotion: Bool = false) -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = [
       "--fixture", "--fixture-session", session, "--route", route, "--chapter", "c2s1",
     ]
+    if reduceMotion { app.launchArguments.append("--fixture-reduce-motion") }
     app.launch()
     XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
     return app
@@ -72,6 +73,96 @@ final class LearningFunctionalUITests: XCTestCase {
     attachment.name = name
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  func testStudyPlanCompactsOnScrollAndExpandsAtTop() throws {
+    let app = launch("study", session: UUID().uuidString)
+    let details = app.buttons["计划详情"].firstMatch
+    let progress = app.descendants(matching: .any)["study.plan.progress"].firstMatch
+    let scroll = app.scrollViews["study.scroll"]
+    XCTAssertTrue(details.waitForExistence(timeout: 20))
+    XCTAssertTrue(progress.exists)
+    let expandedProgressY = progress.frame.minY
+    let courseSwitch = app.buttons["study.course.switch"].firstMatch
+    let initialCourseFrame = courseSwitch.frame
+    let initialProgressValue = progress.value as? String
+    evidence("study-plan-expanded", app: app)
+
+    scroll.swipeUp(velocity: .slow)
+    evidence("study-plan-after-scroll", app: app)
+    wait("Scrolling should hide the plan details and keep only its pinned progress") {
+      !details.exists && progress.exists && progress.frame.minY < expandedProgressY - 40
+    }
+    XCTAssertEqual(progress.value as? String, initialProgressValue)
+    XCTAssertEqual(courseSwitch.frame.minY, initialCourseFrame.minY, accuracy: 1)
+    XCTAssertTrue(courseSwitch.isHittable)
+
+    for _ in 0..<6 {
+      if details.exists && details.isHittable { break }
+      scroll.swipeDown(velocity: .fast)
+    }
+    wait("Returning to the top should expand the plan again") {
+      details.exists && details.isHittable && abs(progress.frame.minY - expandedProgressY) < 2
+    }
+    evidence("study-plan-expanded-again", app: app)
+    details.tap()
+    XCTAssertTrue(app.staticTexts["学习计划"].firstMatch.waitForExistence(timeout: 8))
+  }
+
+  func testStudyPlanThresholdsAndChapterTapsWithReducedMotion() throws {
+    let app = launch("study", session: UUID().uuidString, reduceMotion: true)
+    let details = app.buttons["计划详情"].firstMatch
+    XCTAssertTrue(details.waitForExistence(timeout: 20))
+    let scroll = app.scrollViews["study.scroll"]
+    let chapter = app.buttons["study.chapter.c1"]
+    // Set up the same directory state on both device sizes before measuring.
+    if chapter.value as? String == "已展开" { chapter.tap() }
+    let nextChapter = app.buttons["study.chapter.c2"]
+    if nextChapter.value as? String != "已展开" { nextChapter.tap() }
+    let initialChapterTop = chapter.frame.minY
+    let expandedPlanBottom = initialChapterTop - 8
+    let progress = app.descendants(matching: .any)["study.plan.progress"].firstMatch
+    let expandedProgressY = progress.frame.minY
+
+    func drag(upBy distance: CGFloat) {
+      let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.55))
+      start.press(
+        forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)),
+        withVelocity: .slow, thenHoldForDuration: 0.25)
+    }
+
+    drag(upBy: 30)
+    XCTAssertTrue(details.exists, "A small scroll should leave the plan expanded")
+    drag(upBy: 90)
+    wait("Passing the collapse threshold should compact the plan without motion") {
+      !details.exists && progress.frame.minY < expandedProgressY - 40
+    }
+    let compactProgressY = progress.frame.minY
+    XCTAssertGreaterThan(chapter.frame.midY, progress.frame.maxY + 10)
+    XCTAssertLessThan(
+      chapter.frame.midY, expandedPlanBottom,
+      "The chapter must be underneath the area released by the expanded plan")
+    XCTAssertTrue(chapter.isHittable)
+    XCTAssertEqual(chapter.value as? String, "已收起")
+    chapter.tap()
+    wait("The invisible expanded placeholder must not intercept chapter taps") {
+      chapter.value as? String == "已展开"
+    }
+    XCTAssertFalse(details.exists, "Opening a chapter should not re-expand the pinned plan")
+    XCTAssertEqual(progress.frame.minY, compactProgressY, accuracy: 1)
+    // Gesture recognition consumes a few points differently on each device.
+    // Measure the actual offset using the first chapter's stable document position.
+    let scrollOffset = initialChapterTop - chapter.frame.minY
+    if scrollOffset > 48 { drag(upBy: -(scrollOffset - 30)) }
+    let partialOffset = initialChapterTop - chapter.frame.minY
+    XCTAssertGreaterThan(partialOffset, 16)
+    XCTAssertLessThanOrEqual(partialOffset, 48)
+    XCTAssertFalse(details.exists, "Scrolling back partway should keep the plan compact")
+    drag(upBy: -160)
+    wait("Returning to the top should restore the full plan with reduced motion") {
+      details.exists && details.isHittable
+    }
+    evidence("study-plan-reduced-motion-restored", app: app)
   }
 
   func testAssignmentDiagnosisMistakeRedoAndMasteryPersist() throws {

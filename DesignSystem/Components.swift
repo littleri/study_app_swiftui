@@ -244,10 +244,15 @@ struct StickerIcon: View {
 struct EmptyStateView: View {
   let title: String
   let message: String
-  var asset: String = "/assets/brand/empty-states/no-courses-v1.png"
+  var asset: String? = nil
+  var icon: String? = nil
   var body: some View {
     VStack(spacing: 14) {
-      AssetImage(asset).frame(maxWidth: 250, maxHeight: 190)
+      if let asset {
+        AssetImage(asset).frame(maxWidth: 250, maxHeight: 190)
+      } else if let icon {
+        BCGlyph(icon, color: DS.primary).frame(width: 34, height: 34).accessibilityHidden(true)
+      }
       Text(title).font(DS.font(21, weight: .bold))
       Text(message).font(DS.font(14)).lineSpacing(6).foregroundStyle(DS.secondary)
         .multilineTextAlignment(.center)
@@ -292,6 +297,27 @@ struct ProgressiveMaterial: View {
       LinearGradient(
         colors: top ? [.black, .clear] : [.clear, .black], startPoint: .top, endPoint: .bottom)
     ).allowsHitTesting(false).accessibilityHidden(true)
+  }
+}
+
+private struct NavigationBarSurface: ViewModifier {
+  let color: Color
+
+  func body(content: Content) -> some View {
+    content
+      .background { color.ignoresSafeArea(.container, edges: .top) }
+      .overlay(alignment: .bottom) {
+        // Extend the transition into the scroll content without taking space
+        // from the layout or intercepting controls beneath the header.
+        ProgressiveMaterial(top: true).frame(height: 24).offset(y: 24)
+      }
+      .zIndex(1)
+  }
+}
+
+extension View {
+  func navigationBarSurface(_ color: Color = DS.background) -> some View {
+    modifier(NavigationBarSurface(color: color))
   }
 }
 

@@ -125,6 +125,7 @@ struct NotesPageHeader: View {
       }
     }.frame(height: 44).padding(.horizontal, store.isPad ? 32 : 16).padding(
       .top, NotesScreenMetrics.titleTopInset)
+      .navigationBarSurface()
   }
 }
 

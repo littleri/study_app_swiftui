@@ -6,11 +6,6 @@ struct LearningChapterNode: Identifiable {
   var id: String { chapter.chapter_id }
 }
 
-private struct LearningStudyOffsetKey: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 func learningDirectory(_ chapters: [Chapter]) -> [LearningChapterNode] {
   let ids = Set(chapters.map(\.chapter_id))
   let roots = chapters.filter {
@@ -94,50 +89,60 @@ struct StudyDirectoryView: View {
   }
 
   var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
-          Section {
-            if directory.isEmpty {
-              EmptyStateView(title: "开始你的第一门课程", message: "添加教材后，这里会按原书目录整理章节和每个小节的学习入口。")
-              BCButton("创建课程", icon: "plus") { store.go(.upload) }
-            } else {
-              ForEach(Array(directory.enumerated()), id: \.element.id) { index, node in
-                chapterCard(node, index: index)
-                  .id(node.id)
-              }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 8) {
+        // Only this invisible copy participates in the scrolling layout. Its
+        // expanded height keeps the directory and scroll bounds stable while
+        // the visible controls above the scroll view collapse.
+        studyHeader(compact: false)
+          .hidden().allowsHitTesting(false).accessibilityHidden(true)
+        LazyVStack(alignment: .leading, spacing: 8) {
+          if directory.isEmpty {
+            EmptyStateView(
+              title: store.courses.isEmpty ? "开始你的第一门课程" : "课程资料还在准备中",
+              message: store.courses.isEmpty
+                ? "添加教材后，这里会按原书目录整理章节和每个小节的学习入口。"
+                : "你可以查看解析进度，或先选择另一门已经就绪的课程。",
+              asset: store.courses.isEmpty ? "/assets/brand/empty-states/no-courses-v1.png" : nil,
+              icon: store.courses.isEmpty ? nil : "LibraryBig")
+            BCButton(store.courses.isEmpty ? "创建课程" : "查看课程资料", icon: "plus") {
+              store.go(store.courses.isEmpty ? .upload : .library)
             }
-          } header: {
-            ZStack(alignment: .top) {
-              // The source reserves expanded space while its sticky controls compact,
-              // preventing the directory from jumping under a finger during a swipe.
-              studyHeader(compact: false).hidden().allowsHitTesting(false).accessibilityHidden(true)
-              studyHeader(compact: compactPlan)
+          } else {
+            ForEach(Array(directory.enumerated()), id: \.element.id) { index, node in
+              chapterCard(node, index: index)
+                .id(node.id)
             }
           }
         }
-        .background(
-          GeometryReader { geometry in
-            Color.clear.preference(
-              key: LearningStudyOffsetKey.self,
-              value: geometry.frame(in: .named("learning-study-scroll")).minY)
-          }
-        )
+      }
+      .frame(maxWidth: 720)
+      .padding(.horizontal, store.isPad ? 32 : 16)
+      .padding(.bottom, 32)
+      .frame(maxWidth: .infinity)
+      .onGeometryChange(for: Int.self) { geometry in
+        let scrollTop = -geometry.frame(in: .scrollView).minY
+        // Report only threshold crossings, rather than every scrolling frame.
+        return scrollTop > 48 ? 2 : scrollTop > 16 ? 1 : 0
+      } action: { region in
+        let next = region == 2 || (compactPlan && region == 1)
+        guard next != compactPlan else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.28)) { compactPlan = next }
+      }
+    }
+    .accessibilityIdentifier("study.scroll")
+    .overlay(alignment: .top) {
+      // The overlay occupies only the visible controls' height. Chapters can
+      // scroll and receive taps through the space released by the compact plan.
+      studyHeader(compact: compactPlan)
         .frame(maxWidth: 720)
         .padding(.horizontal, store.isPad ? 32 : 16)
-        .padding(.bottom, 32)
-        .frame(maxWidth: .infinity)
-      }
-      .coordinateSpace(name: "learning-study-scroll")
-      .onPreferenceChange(LearningStudyOffsetKey.self) { offset in
-        let next = compactPlan ? offset < -16 : offset < -48
-        guard next != compactPlan else { return }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { compactPlan = next }
-      }
-      .onChange(of: expandedChapter) { _, _ in savePosition() }
-      .onChange(of: expandedSection) { _, _ in savePosition() }
-      .task(id: positionKey) { restorePosition() }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .navigationBarSurface()
     }
+    .onChange(of: expandedChapter) { _, _ in savePosition() }
+    .onChange(of: expandedSection) { _, _ in savePosition() }
+    .task(id: positionKey) { restorePosition() }
   }
 
   private func studyHeader(compact: Bool) -> some View {
@@ -160,7 +165,7 @@ struct StudyDirectoryView: View {
             }
             Image(systemName: "chevron.down").font(DS.font(16, weight: .semibold))
           }
-        }.buttonStyle(.plain)
+        }.buttonStyle(.plain).accessibilityIdentifier("study.course.switch")
         Spacer(minLength: 4)
         Button {
           if store.currentCourse == nil {
@@ -179,44 +184,50 @@ struct StudyDirectoryView: View {
         Text("演示课程 · 仅展示教材封面、标题和原书目录")
           .font(DS.font(14)).foregroundStyle(DS.secondary)
       } else if !directory.isEmpty {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: compact ? 0 : 4) {
           if !compact {
-            HStack {
-              Text("学习计划").font(DS.font(20.8, weight: .bold))
-              Spacer()
-              Button {
-                store.go(.plan)
-              } label: {
-                HStack(spacing: 4) {
-                  Text("计划详情")
-                  Image(systemName: "chevron.right")
-                }
-                .font(DS.font(20, weight: .bold)).foregroundStyle(DS.primary)
-              }.buttonStyle(.plain)
-            }
-            HStack(spacing: 12) {
-              StickerIcon("Check", size: 30, glyphSize: 16)
-              VStack(alignment: .leading, spacing: 4) {
-                Text("今日建议 · \(currentTask?.minutes ?? store.plan?.daily_minutes ?? 25) 分钟")
-                  .font(DS.font(14)).foregroundStyle(DS.secondary)
-                Text(currentTask?.title ?? directory.first?.chapter.title ?? "从第一节开始")
-                  .font(DS.font(16, weight: .bold)).lineLimit(2)
+            VStack(alignment: .leading, spacing: 4) {
+              HStack {
+                Text("学习计划").font(DS.font(20.8, weight: .bold))
+                Spacer()
+                Button {
+                  store.go(.plan)
+                } label: {
+                  HStack(spacing: 4) {
+                    Text("计划详情")
+                    Image(systemName: "chevron.right")
+                  }
+                  .font(DS.font(20, weight: .bold)).foregroundStyle(DS.primary)
+                }.buttonStyle(.plain)
               }
-            }.padding(.top, 12)
+              HStack(spacing: 12) {
+                StickerIcon("Check", size: 30, glyphSize: 16)
+                VStack(alignment: .leading, spacing: 4) {
+                  Text("今日建议 · \(currentTask?.minutes ?? store.plan?.daily_minutes ?? 25) 分钟")
+                    .font(DS.font(14)).foregroundStyle(DS.secondary)
+                  Text(currentTask?.title ?? directory.first?.chapter.title ?? "从第一节开始")
+                    .font(DS.font(16, weight: .bold)).lineLimit(2)
+                }
+              }.padding(.top, 12)
+            }
+            .transition(.opacity.combined(with: .move(edge: .top)))
           }
           BCProgress(value: studyProgress)
+            .accessibilityIdentifier("study.plan.progress")
           if !compact {
             Text("计划完成 \(Int((studyProgress * 100).rounded()))%")
               .font(DS.font(20)).foregroundStyle(DS.secondary)
+              .transition(.opacity)
           }
         }
         .padding(.horizontal, 16).padding(.vertical, compact ? 10 : 16)
+        .clipped()
         .background(DS.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border, lineWidth: 1))
+        .shadow(color: DS.text.opacity(compact ? 0.08 : 0), radius: 4, y: 2)
       }
     }
     .padding(.top, store.isPad ? 8 : 12).padding(.bottom, 0)
-    .background(DS.background)
   }
 
   private func chapterCard(_ node: LearningChapterNode, index: Int) -> some View {
@@ -260,7 +271,9 @@ struct StudyDirectoryView: View {
             DS.font(14, weight: .semibold)
           ).foregroundStyle(DS.secondary)
         }.padding(18).contentShape(Rectangle())
-      }.buttonStyle(.plain).accessibilityAddTraits(expanded ? .isSelected : [])
+      }.buttonStyle(.plain).accessibilityIdentifier("study.chapter." + node.id)
+        .accessibilityAddTraits(expanded ? .isSelected : [])
+        .accessibilityValue(expanded ? "已展开" : "已收起")
       if expanded {
         Divider().overlay(DS.border).padding(.horizontal, 18)
         VStack(spacing: 0) {
@@ -526,7 +539,7 @@ struct LearningPlanView: View {
 
   var body: some View {
     if store.currentSource == nil {
-      LearningNoSource(title: "暂无学习计划", message: "完成教材解析、章节确认和课程生成后，就能开始每日学习。")
+      LearningNoSource(title: "暂无学习计划", message: "完成教材解析、章节确认和课程生成后，就能开始每日学习。", icon: "CalendarDays")
     } else {
       LearningScroll(spacing: 12) {
         BCCard {

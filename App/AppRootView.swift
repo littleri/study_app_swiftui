@@ -8,6 +8,7 @@ struct AppRootView: View {
   @State private var assistantLeft = false
   @State private var lessonAssistantTop: CGFloat?
   @State private var lessonAssistantLeft = false
+  @State private var nativeTabContentBottom: CGFloat?
   var body: some View {
     GeometryReader { geometry in
       let pad =
@@ -20,23 +21,31 @@ struct AppRootView: View {
             expandedWidth: min(232, max(208, geometry.size.width * 0.22)),
             topInset: max(0, 32 - geometry.safeAreaInsets.top))
         }
-        VStack(spacing: 0) {
-          if !store.route.hidesHeader {
-            BCHeader(
-              store.route == .courseDetail ? store.currentTitle : store.route.title,
-              back: store.route.isTab
-                || [.courseReady, .courseImportReady, .communityImport].contains(store.route)
-                ? nil : { store.back() },
-              titleColor: store.route == .upload ? .white : DS.text
-            ).padding(.top, pad ? max(0, 62 - geometry.safeAreaInsets.top) : 0).padding(
-              .horizontal, pad ? 16 : 0)
-          }
-          screen.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }.safeAreaInset(edge: .bottom, spacing: 0) {
+        Group {
           if !pad, store.route.showsPrimaryNavigation {
-            PhoneBottomBar().padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
-              .background { ProgressiveMaterial().ignoresSafeArea(edges: .bottom) }
+            if #available(iOS 26.0, *) {
+              NativePhoneTabs { route in
+                page(route: route, pad: false, topInset: 0)
+              } onContentBottomChange: { nativeTabContentBottom = $0 }
+            } else {
+              page(route: store.route, pad: false, topInset: 0)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                  PhoneBottomBar().padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
+                    .background { ProgressiveMaterial().ignoresSafeArea(edges: .bottom) }
+                }
+            }
+          } else {
+            page(route: store.route, pad: pad, topInset: max(0, 62 - geometry.safeAreaInsets.top))
           }
+        }
+        .overlay(alignment: .top) {
+          // A pinned section header cannot protect the window's status bar:
+          // paint that safe area above every scrolling page, outside TabView.
+          pageBackground
+            .frame(height: geometry.safeAreaInsets.top)
+            .offset(y: -geometry.safeAreaInsets.top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
       }
       .background(pageBackground)
@@ -56,7 +65,9 @@ struct AppRootView: View {
                 + geometry.safeAreaInsets.trailing,
               height: geometry.size.height + geometry.safeAreaInsets.top
                 + geometry.safeAreaInsets.bottom), safeArea: geometry.safeAreaInsets,
-            navHeight: (!pad && store.route.showsPrimaryNavigation) ? 72 : 0,
+            navHeight: usesNativeTabs(pad: pad)
+              ? 0 : (!pad && store.route.showsPrimaryNavigation) ? 72 : 0,
+            navigationTop: usesNativeTabs(pad: pad) ? nativeTabContentBottom : nil,
             lessonEntry: store.route == .lesson,
             top: store.route == .lesson ? $lessonAssistantTop : $assistantTop,
             left: store.route == .lesson ? $lessonAssistantLeft : $assistantLeft)
@@ -87,11 +98,10 @@ struct AppRootView: View {
       }
       .overlay {
         if store.isLoading {
-          VStack(spacing: 18) {
-            AssetImage("/assets/brand/cloud-mascot-home.png").frame(width: 130, height: 130)
-            ProgressView().tint(DS.primary)
-            Text("正在准备学习空间").font(DS.font(14)).foregroundStyle(DS.secondary)
-          }.frame(maxWidth: .infinity, maxHeight: .infinity).background(DS.background)
+          Image("Splash").resizable().scaledToFit().frame(width: 144, height: 144)
+            .accessibilityHidden(true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(hex: 0xfefdfa).ignoresSafeArea())
         }
       }
       .overlay {
@@ -129,12 +139,32 @@ struct AppRootView: View {
     default: DS.background
     }
   }
-  @ViewBuilder private var screen: some View {
-    switch store.route {
+  private func usesNativeTabs(pad: Bool) -> Bool {
+    if #available(iOS 26.0, *) { return !pad && store.route.showsPrimaryNavigation }
+    return false
+  }
+
+  private func page(route: Route, pad: Bool, topInset: CGFloat) -> some View {
+    VStack(spacing: 0) {
+      if !route.hidesHeader {
+        BCHeader(
+          route == .courseDetail ? store.currentTitle : route.title,
+          back: route.isTab || [.courseReady, .courseImportReady, .communityImport].contains(route)
+            ? nil : { store.back() },
+          titleColor: route == .upload ? .white : DS.text
+        ).padding(.top, pad ? topInset : 0).padding(.horizontal, pad ? 16 : 0)
+          .navigationBarSurface(pageBackground)
+      }
+      screen(route: route).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }.background(pageBackground)
+  }
+
+  @ViewBuilder private func screen(route: Route) -> some View {
+    switch route {
     case .study, .plan, .flashcards, .lesson, .assignment, .diagnosis, .mistakes, .export:
-      LearningRouterView(route: store.route)
-    case .notes, .voiceNote, .source: NotesRouterView(route: store.route)
-    default: CoursesRouterView(route: store.route)
+      LearningRouterView(route: route)
+    case .notes, .voiceNote, .source: NotesRouterView(route: route)
+    default: CoursesRouterView(route: route)
     }
   }
 }
@@ -142,6 +172,161 @@ private let primaryTabs: [Route] = [.home, .study, .community, .profile]
 private func isCurrentTab(_ tab: Route, _ route: Route) -> Bool {
   tab == route || (tab == .home && route == .courseDetail)
 }
+
+@available(iOS 26.0, *)
+private struct NativePhoneTabs<Content: View>: View {
+  @Environment(AppStore.self) private var store
+  @ViewBuilder var content: (Route) -> Content
+  var onContentBottomChange: (CGFloat) -> Void
+
+  private var selection: Binding<Route> {
+    Binding(
+      get: { store.route.isTab ? store.route : .home },
+      set: { store.go($0) })
+  }
+
+  var body: some View {
+    TabView(selection: selection) {
+      ForEach(primaryTabs) { tab in
+        Tab(value: tab) {
+          NativeTabPage(tab: tab, content: content, onContentBottomChange: onContentBottomChange)
+        } label: {
+          Label {
+            Text(tab == .community ? "发现" : tab.title)
+          } icon: {
+            Image(uiImage: NativeTabArtwork.image(tab, selected: isCurrentTab(tab, store.route)))
+              .renderingMode(.template)
+          }
+        }
+        .accessibilityIdentifier("tab-" + tab.rawValue)
+      }
+    }
+    .tabBarMinimizeBehavior(.never)
+    .scrollEdgeEffectStyle(.soft, for: .bottom)
+    .tint(DS.primary)
+  }
+}
+
+@available(iOS 26.0, *)
+private struct NativeTabPage<Content: View>: View {
+  @Environment(AppStore.self) private var store
+  let tab: Route
+  @ViewBuilder var content: (Route) -> Content
+  var onContentBottomChange: (CGFloat) -> Void
+
+  var body: some View {
+    // Each Tab keeps a stable page wrapper. Only the active page starts tasks.
+    Group {
+      if isCurrentTab(tab, store.route) {
+        content(store.route)
+          .background {
+            NativeTabBarConfiguration(onTopChange: onContentBottomChange)
+              .frame(width: 0, height: 0)
+          }
+      }
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+private struct NativeTabBarConfiguration: UIViewRepresentable {
+  var onTopChange: (CGFloat) -> Void
+
+  func makeUIView(context: Context) -> TabBarConfigurationView {
+    let view = TabBarConfigurationView()
+    view.isUserInteractionEnabled = false
+    return view
+  }
+
+  func updateUIView(_ view: TabBarConfigurationView, context: Context) {
+    view.onTopChange = onTopChange
+    view.setNeedsLayout()
+  }
+}
+
+@available(iOS 26.0, *)
+private final class TabBarConfigurationView: UIView {
+  var onTopChange: ((CGFloat) -> Void)?
+  private var lastTop: CGFloat?
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    setNeedsLayout()
+  }
+
+  override func safeAreaInsetsDidChange() {
+    super.safeAreaInsetsDidChange()
+    setNeedsLayout()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard let window else { return }
+    var responder: UIResponder? = self
+    while let current = responder {
+      if let controller = current as? UIViewController,
+        let bar = controller.tabBarController?.tabBar, !bar.isHidden,
+        let items = bar.items, items.count == primaryTabs.count
+      {
+        // Keep the system material and layout; use the app's bundled CJK font.
+        let regular = UIFont(name: "BookCourseNotoSansSC-Regular", size: 11)
+          ?? .systemFont(ofSize: 11)
+        let selected = UIFont(name: "BookCourseNotoSansSC-Bold", size: 11)
+          ?? .boldSystemFont(ofSize: 11)
+        if bar.standardAppearance.stackedLayoutAppearance.normal.titleTextAttributes[.font]
+          as? UIFont != regular
+        {
+          let appearance = bar.standardAppearance.copy()
+          applyFonts(regular, selected: selected, to: appearance)
+          bar.standardAppearance = appearance
+          if let edge = bar.scrollEdgeAppearance?.copy() as? UITabBarAppearance {
+            applyFonts(regular, selected: selected, to: edge)
+            bar.scrollEdgeAppearance = edge
+          }
+        }
+        for (item, route) in zip(items, primaryTabs) {
+          item.accessibilityIdentifier = "tab-" + route.rawValue
+          if item.titleTextAttributes(for: .normal)?[.font] as? UIFont != regular {
+            item.setTitleTextAttributes([.font: regular], for: .normal)
+            item.setTitleTextAttributes([.font: selected], for: .selected)
+          }
+        }
+        let top = bar.convert(bar.bounds, to: window).minY
+        if top > 0, lastTop == nil || abs((lastTop ?? 0) - top) > 0.5 {
+          lastTop = top
+          DispatchQueue.main.async { [weak self] in self?.onTopChange?(top) }
+        }
+        return
+      }
+      responder = current.next
+    }
+  }
+
+  private func applyFonts(_ regular: UIFont, selected: UIFont, to appearance: UITabBarAppearance) {
+    for layout in [
+      appearance.stackedLayoutAppearance, appearance.inlineLayoutAppearance,
+      appearance.compactInlineLayoutAppearance,
+    ] {
+      layout.normal.titleTextAttributes[.font] = regular
+      layout.selected.titleTextAttributes[.font] = selected
+    }
+  }
+}
+
+@MainActor private enum NativeTabArtwork {
+  private static var images: [String: UIImage] = [:]
+
+  static func image(_ tab: Route, selected: Bool) -> UIImage {
+    let key = "nav-\(tab.rawValue)-\(selected ? "selected" : "normal")"
+    if let cached = images[key] { return cached }
+    let renderer = ImageRenderer(content: SVGAsset(path: "icons/\(key).svg").frame(width: 25, height: 25))
+    renderer.scale = 3
+    let image = (renderer.uiImage ?? UIImage()).withRenderingMode(.alwaysTemplate)
+    images[key] = image
+    return image
+  }
+}
+
 struct PhoneBottomBar: View {
   @Environment(AppStore.self) private var store
   @Namespace private var selection
@@ -197,7 +382,7 @@ struct PadRail: View {
           AssetImage("/assets/brand/app-logo.png").frame(width: 32, height: 32).clipShape(
             RoundedRectangle(cornerRadius: 11))
           if expanded {
-            Text("BookCourse AI").font(DS.font(20, weight: .bold)).foregroundStyle(.white)
+            Text("CloudPath").font(DS.font(20, weight: .bold)).foregroundStyle(.white)
             Spacer()
           }
         }.frame(height: 32)
@@ -341,6 +526,7 @@ struct FloatingAssistant: View {
   var windowSize: CGSize
   var safeArea: EdgeInsets
   var navHeight: CGFloat
+  var navigationTop: CGFloat? = nil
   var lessonEntry = false
   @Environment(\.bookCourseReduceMotion) private var reduceMotion
   @Binding var top: CGFloat?
@@ -355,7 +541,8 @@ struct FloatingAssistant: View {
     let completion: CGFloat = lessonEntry && store.learningState.readerCompletionVisible ? 68 : 0
     return max(
       minTop,
-      windowSize.height - bottom - navHeight - (lessonEntry ? 16 : 12) - orbHeight - completion)
+      min(windowSize.height - bottom - navHeight, navigationTop ?? .greatestFiniteMagnitude)
+        - (lessonEntry ? 16 : 12) - orbHeight - completion)
   }
   private var initialTop: CGFloat {
     minTop + (maxTop - minTop) * (lessonEntry ? 0.56 : windowSize.height < 760 ? 0.69 : 0.82)

@@ -314,7 +314,7 @@ struct LessonReaderView: View {
       } else {
         LearningScroll(width: 720) {
           BCHeader(chapter?.title ?? "等待章节课程", back: { store.back() })
-          EmptyStateView(title: "本节课程尚未准备好", message: "课程内容准备好后，会按原书结构展示可追溯的图文讲解。你也可以直接打开原文。")
+          EmptyStateView(title: "本节课程尚未准备好", message: "课程内容准备好后，会按原书结构展示可追溯的图文讲解。你也可以直接打开原文。", icon: "BookOpen")
           if let chapter, let bookID = store.selectedBookID {
             BCButton("阅读原文", icon: "book") {
               store.openSource(
@@ -388,7 +388,7 @@ struct LessonReaderView: View {
     }.frame(height: 44, alignment: .top).padding(.horizontal, store.isPad ? 32 : 16)
       .padding(.top, NotesScreenMetrics.titleTopInset).padding(.bottom, store.isPad ? 14.84 : 6)
       .foregroundStyle(DS.text)
-      .background(DS.surface)
+      .navigationBarSurface(DS.surface)
   }
 
   private var pageStatus: some View {

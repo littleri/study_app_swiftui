@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class BookCourseUITests: XCTestCase {
   override func setUpWithError() throws { continueAfterFailure = false }
@@ -26,6 +27,152 @@ final class BookCourseUITests: XCTestCase {
     XCTAssertTrue(app.textFields["community.search"].waitForExistence(timeout: 8))
     app.buttons["tab-profile"].tap()
     XCTAssertTrue(app.staticTexts["PROFILE"].firstMatch.waitForExistence(timeout: 8))
+  }
+
+  func testDiscoveryStatusBarBackgroundAfterScrolling() throws {
+    XCUIDevice.shared.orientation = .portrait
+    let app = launch("community")
+    XCTAssertTrue(app.textFields["community.search"].waitForExistence(timeout: 20))
+    guard app.windows.firstMatch.frame.width < 720 else {
+      throw XCTSkip("Checks the phone status bar above the pinned discovery header")
+    }
+
+    func assertStatusBarBackground(_ name: String) throws {
+      // Capture the device: app screenshots can omit system status-bar pixels.
+      let screenshot = XCUIScreen.main.screenshot()
+      let attachment = XCTAttachment(screenshot: screenshot)
+      attachment.name = name
+      attachment.lifetime = .keepAlways
+      add(attachment)
+      let image = try XCTUnwrap(screenshot.image.cgImage)
+      let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+      let colorSpace = CGColorSpaceCreateDeviceRGB()
+      let context = try XCTUnwrap(CGContext(
+        data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+        space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      // Sample above the clock, island and indicators, away from rounded corners.
+      for fraction in [0.08, 0.30, 0.70, 0.92] {
+        let pixel = try XCTUnwrap(image.cropping(to: CGRect(
+          x: CGFloat(image.width) * fraction, y: 16 * scale, width: 1, height: 1)))
+        context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        for (channel, expected) in [246, 248, 251].enumerated() {
+          XCTAssertEqual(Int(bytes[channel]), expected, accuracy: 3,
+            "\(name): scrolling content must not paint the status bar at x=\(fraction)")
+        }
+      }
+    }
+
+    try assertStatusBarBackground("discovery-status-bar-initial")
+    app.scrollViews.firstMatch.swipeUp(velocity: .slow)
+    try assertStatusBarBackground("discovery-status-bar-scrolled")
+    XCTAssertTrue(app.textFields["community.search"].isHittable)
+    app.buttons["tab-home"].tap()
+    XCTAssertTrue(app.staticTexts["我的课程"].firstMatch.waitForExistence(timeout: 10))
+    app.buttons["tab-community"].tap()
+    try assertStatusBarBackground("discovery-status-bar-after-tab-switch")
+  }
+
+  func testNativePhoneTabBarRoutesAndReselection() throws {
+    guard #available(iOS 26.0, *) else { throw XCTSkip("Requires native Liquid Glass tabs") }
+    XCUIDevice.shared.orientation = .portrait
+    defer { XCUIDevice.shared.orientation = .portrait }
+    let app = launch("courseDetail")
+    guard app.windows.firstMatch.frame.width < 720 else {
+      XCTAssertFalse(app.tabBars.firstMatch.exists, "Wide iPad layouts use the navigation rail")
+      return
+    }
+    let bar = app.tabBars.firstMatch
+    XCTAssertTrue(bar.waitForExistence(timeout: 20))
+    let home = bar.buttons["tab-home"]
+    XCTAssertTrue(home.isSelected, "Course details belong to the Home tab")
+    home.tap()
+    XCTAssertTrue(app.staticTexts["我的课程"].firstMatch.waitForExistence(timeout: 10))
+    bar.buttons["tab-study"].tap()
+    let details = app.buttons["计划详情"].firstMatch
+    XCTAssertTrue(details.waitForExistence(timeout: 10))
+    let initialBarFrame = bar.frame
+    app.scrollViews["study.scroll"].swipeUp(velocity: .slow)
+    XCTAssertEqual(bar.frame.minY, initialBarFrame.minY, accuracy: 1)
+    XCTAssertTrue(bar.buttons["tab-study"].isSelected)
+    app.scrollViews["study.scroll"].swipeDown(velocity: .fast)
+    XCTAssertTrue(details.isHittable)
+    details.tap()
+    XCTAssertFalse(app.tabBars.firstMatch.exists, "The plan is a full-page detail route")
+    app.buttons["返回"].firstMatch.tap()
+    XCTAssertTrue(bar.waitForExistence(timeout: 10))
+    XCTAssertTrue(bar.buttons["tab-study"].isSelected)
+    keepScreenshot("liquid-glass-study", app: app)
+    bar.buttons["tab-community"].tap()
+    XCTAssertTrue(app.textFields["community.search"].waitForExistence(timeout: 8))
+    bar.buttons["tab-profile"].tap()
+    XCTAssertTrue(app.staticTexts["PROFILE"].firstMatch.waitForExistence(timeout: 8))
+    bar.buttons["tab-home"].tap()
+    XCTAssertTrue(app.staticTexts["我的课程"].firstMatch.waitForExistence(timeout: 8))
+    keepScreenshot("liquid-glass-home", app: app)
+  }
+
+  func testNativePhoneTabBarBottomContentAndRotation() throws {
+    guard #available(iOS 26.0, *) else { throw XCTSkip("Requires native Liquid Glass tabs") }
+    XCUIDevice.shared.orientation = .portrait
+    defer { XCUIDevice.shared.orientation = .portrait }
+    let app = launch("home")
+    guard app.windows.firstMatch.frame.width < 720 else { return }
+    let bar = app.tabBars.firstMatch
+    XCTAssertTrue(bar.waitForExistence(timeout: 20))
+    let materials = app.buttons["课程资料"].firstMatch
+    for _ in 0..<4 {
+      if materials.exists && materials.isHittable && materials.frame.maxY < bar.frame.minY { break }
+      app.scrollViews.firstMatch.swipeUp(velocity: .slow)
+    }
+    XCTAssertTrue(materials.isHittable)
+    XCTAssertLessThanOrEqual(materials.frame.maxY, bar.frame.minY)
+    materials.tap()
+    XCTAssertTrue(bar.buttons["tab-home"].isSelected)
+    bar.buttons["tab-home"].tap()
+    XCUIDevice.shared.orientation = .landscapeLeft
+    let rotated = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height
+      }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 15), .completed)
+    for id in ["tab-home", "tab-study", "tab-community", "tab-profile"] {
+      XCTAssertTrue(bar.buttons[id].isHittable)
+    }
+    XCTAssertGreaterThan(bar.frame.minY, app.windows.firstMatch.frame.height * 0.65)
+    keepScreenshot("liquid-glass-landscape", app: app)
+  }
+
+  func testNativePhoneTabBarAssistantAndKeyboardAvoidance() throws {
+    guard #available(iOS 26.0, *) else { throw XCTSkip("Requires native Liquid Glass tabs") }
+    XCUIDevice.shared.orientation = .portrait
+    let app = launch("home")
+    guard app.windows.firstMatch.frame.width < 720 else {
+      XCTAssertFalse(app.tabBars.firstMatch.exists)
+      return
+    }
+    let bar = app.tabBars.firstMatch
+    XCTAssertTrue(bar.waitForExistence(timeout: 20))
+    let orb = app.buttons["assistant-entry"].firstMatch
+    XCTAssertTrue(orb.waitForExistence(timeout: 10))
+    orb.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+      forDuration: 0.1,
+      thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.97)))
+    XCTAssertLessThanOrEqual(orb.frame.maxY, bar.frame.minY - 8)
+    orb.tap()
+    let input = app.textFields["guide-input"]
+    XCTAssertTrue(input.waitForExistence(timeout: 8))
+    input.tap()
+    input.typeText("Review my learning plan")
+    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+    XCTAssertLessThanOrEqual(input.frame.maxY, app.keyboards.firstMatch.frame.minY + 1)
+    let close = app.buttons["global-assistant-close"]
+    XCTAssertTrue(close.isHittable)
+    keepScreenshot("liquid-glass-assistant-keyboard", app: app)
+    close.tap()
+    bar.buttons["tab-study"].tap()
+    XCTAssertTrue(app.staticTexts["学习计划"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(bar.buttons["tab-study"].isHittable)
   }
   func testAllRoutesAndGlobalSheetsLaunch() throws {
     let routes = [

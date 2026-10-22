@@ -98,9 +98,10 @@ struct LearningNoSource: View {
   @Environment(AppStore.self) private var store
   let title: String
   let message: String
+  var icon: String? = nil
   var body: some View {
     LearningScroll {
-      EmptyStateView(title: title, message: message)
+      EmptyStateView(title: title, message: message, icon: icon)
       BCButton("查看课程库", icon: "books.vertical", style: .secondary) { store.go(.library) }
       BCButton("上传教材", icon: "arrow.up.doc") { store.go(.upload) }
     }

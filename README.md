@@ -1,4 +1,4 @@
-# BookCourse AI · SwiftUI
+# CloudPath · SwiftUI
 
 独立的原生 iPhone / iPad 前端，最低 iOS 17。采用 SwiftUI、PDFKit、PencilKit、AVFAudio 和本地 SQLite；教材检索使用原生 ONNX Runtime。页面、弹层、颜色、字体、图标与示例文案以原 React 项目当前工作区为依据，参考截图在 `References/VisualBaselines/`。应用运行和日常构建均不需要原仓库、Node.js、Vite 或 WebView。
 

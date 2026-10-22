@@ -519,7 +519,7 @@ struct CourseParseReadyView: View {
   var body: some View {
     if let source = store.currentSource {
       CourseCoverToContent(
-        cover: source.summary.cover_url ?? "/assets/brand/cloud-mascot-home.png", parsing: true
+        cover: source.summary.cover_url, parsing: true, documentKind: fileKind
       ) {
         HStack(spacing: 6) {
           StickerIcon("CheckCircle2", size: 24)
@@ -553,7 +553,7 @@ struct CourseParseReadyView: View {
       }
     } else {
       CourseFeaturePage {
-        EmptyStateView(title: "还没有选择学习资料", message: "先上传 PDF、图片或文档，再进入解析确认。")
+        EmptyStateView(title: "还没有选择学习资料", message: "先上传 PDF、图片或文档，再进入解析确认。", icon: "FileText")
         BCButton("去上传", icon: "folder") { store.replace(.upload) }
       }
     }

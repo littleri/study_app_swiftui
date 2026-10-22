@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Explicit public/assets, public/icons, public/rag excluding runtime; repository fixtures only",
+  "scope": "Explicit public/assets, public/icons, public/rag excluding runtime, native iOS app icon and launch resources; repository fixtures only",
   "excluded": [
     ".env",
     "device databases",
@@ -1424,6 +1424,30 @@
       "path": "Resources/Content/rag/models/Xenova/bge-small-zh-v1.5/vocab.txt",
       "bytes": 109540,
       "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+    },
+    {
+      "source": "ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png",
+      "path": "Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "bytes": 775982,
+      "sha256": "8423899d2b2f4d2a969325eacce9a785a65a81f75c9adaa81657acc95fc80775"
+    },
+    {
+      "source": "ios/App/App/Base.lproj/LaunchScreen.storyboard",
+      "path": "Resources/LaunchScreen.storyboard",
+      "bytes": 2892,
+      "sha256": "782492c6403f56a76c64cfad72bc2031b7453e7196a79c9fa8f2fa602dbddb4c"
+    },
+    {
+      "source": "ios/App/App/Assets.xcassets/Splash.imageset/Contents.json",
+      "path": "Resources/Assets.xcassets/Splash.imageset/Contents.json",
+      "bytes": 155,
+      "sha256": "f42f617e1c5b8baebdf27fb6f5538dd17ccbe822c334df5a753af0b14dc77dce"
+    },
+    {
+      "source": "ios/App/App/Assets.xcassets/Splash.imageset/splash-logo.png",
+      "path": "Resources/Assets.xcassets/Splash.imageset/splash-logo.png",
+      "bytes": 258654,
+      "sha256": "1913a1b19d2c7fac6f369cd9456b858869bf2e229e772ff1f2523586c9f99475"
     }
   ],
   "known_missing_source_assets": [

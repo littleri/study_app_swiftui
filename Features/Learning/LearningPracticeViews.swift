@@ -330,7 +330,7 @@ struct LearningDiagnosisView: View {
       }
     } else {
       LearningScroll(width: 700) {
-        EmptyStateView(title: "还没有诊断结果", message: "提交作业后，系统会对照教材依据定位卡点，并给出下一步复习建议。")
+        EmptyStateView(title: "还没有诊断结果", message: "提交作业后，系统会对照教材依据定位卡点，并给出下一步复习建议。", icon: "ClipboardCheck")
         BCButton("去提交作业", icon: "checkmark.square") { store.go(.assignment) }
         BCButton("回到章节", style: .secondary) { store.go(.lesson) }
       }

@@ -16,7 +16,7 @@ struct CourseSwitcherView: View {
               store.go(.study)
             } label: {
               HStack(spacing: 11) {
-                AssetImage(store.courseFeatureCover(course), contentMode: .fill)
+                CourseCoverImage(path: store.courseFeatureCover(course))
                   .frame(width: 40, height: 50).clipped().clipShape(
                     RoundedRectangle(cornerRadius: 7)
                   )

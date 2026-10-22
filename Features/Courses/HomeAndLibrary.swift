@@ -90,7 +90,7 @@ struct CourseHomeView: View {
                   scrollCourseID = course.id
                 }
               } label: {
-                AssetImage(store.courseFeatureCover(course), contentMode: .fill)
+                CourseCoverImage(path: store.courseFeatureCover(course))
                   .frame(width: coverWidth, height: coverHeight).clipped()
                   .clipShape(RoundedRectangle(cornerRadius: 8))
                   .blur(radius: selected?.id == course.id ? 0 : 1.5)
@@ -353,7 +353,7 @@ struct CourseLibraryView: View {
         }.buttonStyle(.plain)
       }
       if store.courses.isEmpty {
-        EmptyStateView(title: "还没有课程", message: "创建课程，再添加教材或其他学习文件。")
+        EmptyStateView(title: "还没有课程", message: "创建课程，再添加教材或其他学习文件。", icon: "BookOpen")
         BCButton("创建第一门课程") {
           store.courseFeatureStartDraft()
           store.go(.upload)
@@ -374,7 +374,7 @@ struct CourseLibraryView: View {
             store.go(.study)
           } label: {
             HStack(spacing: 16) {
-              AssetImage(store.courseFeatureCover(course), contentMode: .fill).frame(
+              CourseCoverImage(path: store.courseFeatureCover(course)).frame(
                 width: 64, height: 86
               ).clipped().clipShape(RoundedRectangle(cornerRadius: 10))
               VStack(alignment: .leading, spacing: 6) {

@@ -95,7 +95,10 @@ struct CourseDiscoveryView: View {
                 }.padding(12).background(DS.surface, in: RoundedRectangle(cornerRadius: 14))
                   .overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border))
               }
-            }.padding(.top, 4).background(DS.background.opacity(0.97))
+            }.padding(.top, 4)
+              .padding(.horizontal, gutter)
+              .navigationBarSurface()
+              .padding(.horizontal, -gutter)
           }
         }.padding(.horizontal, gutter).padding(.bottom, 28).frame(
           maxWidth: .infinity, alignment: .leading)
